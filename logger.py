@@ -1,10 +1,12 @@
-from collections import defaultdict, deque, OrderedDict
-import datetime
-import time
 import torch
-import torch.distributed as dist
+import time, datetime
+from collections import deque, defaultdict
+import numpy as np
+from typing import Optional, Tuple
 
-class SmoothedValue(object):
+epsilon = 1e-8
+
+class SmoothedValue:
     """Track a series of values and provide access to smoothed values over a
     window or the global series average.
     """
@@ -22,18 +24,18 @@ class SmoothedValue(object):
         self.count += n
         self.total += value * n
 
-    def synchronize_between_processes(self):
-        """
-        Warning: does not synchronize the deque!
-        """
-        if not is_dist_avail_and_initialized():
-            return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device='cuda')
-        dist.barrier()
-        dist.all_reduce(t)
-        t = t.tolist()
-        self.count = int(t[0])
-        self.total = t[1]
+    # def synchronize_between_processes(self):
+    #     """
+    #     Warning: does not synchronize the deque!
+    #     """
+    #     if not is_dist_avail_and_initialized():
+    #         return
+    #     t = torch.tensor([self.count, self.total], dtype=torch.float64, device="cuda")
+    #     dist.barrier()
+    #     dist.all_reduce(t)
+    #     t = t.tolist()
+    #     self.count = int(t[0])
+    #     self.total = t[1]
 
     @property
     def median(self):
@@ -59,14 +61,53 @@ class SmoothedValue(object):
 
     def __str__(self):
         return self.fmt.format(
-            median=self.median,
-            avg=self.avg,
-            global_avg=self.global_avg,
-            max=self.max,
-            value=self.value)
+            median=self.median, avg=self.avg, global_avg=self.global_avg, max=self.max, value=self.value
+        )
 
 
-class MetricLogger(object):
+# def all_gather(data):
+#     """
+#     Run all_gather on arbitrary picklable data (not necessarily tensors)
+#     Args:
+#         data: any picklable object
+#     Returns:
+#         list[data]: list of data gathered from each rank
+#     """
+#     world_size = get_world_size()
+#     if world_size == 1:
+#         return [data]
+#     data_list = [None] * world_size
+#     dist.all_gather_object(data_list, data)
+#     return data_list
+
+
+# def reduce_dict(input_dict, average=True):
+#     """
+#     Args:
+#         input_dict (dict): all the values will be reduced
+#         average (bool): whether to do average or sum
+#     Reduce the values in the dictionary from all processes so that all processes
+#     have the averaged results. Returns a dict with the same fields as
+#     input_dict, after reduction.
+#     """
+#     world_size = get_world_size()
+#     if world_size < 2:
+#         return input_dict
+#     with torch.inference_mode():
+#         names = []
+#         values = []
+#         # sort the keys so that they are consistent across processes
+#         for k in sorted(input_dict.keys()):
+#             names.append(k)
+#             values.append(input_dict[k])
+#         values = torch.stack(values, dim=0)
+#         dist.all_reduce(values)
+#         if average:
+#             values /= world_size
+#         reduced_dict = {k: v for k, v in zip(names, values)}
+#     return reduced_dict
+
+class MetricLogger:
     def __init__(self, delimiter="\t"):
         self.meters = defaultdict(SmoothedValue)
         self.delimiter = delimiter
@@ -83,15 +124,12 @@ class MetricLogger(object):
             return self.meters[attr]
         if attr in self.__dict__:
             return self.__dict__[attr]
-        raise AttributeError("'{}' object has no attribute '{}'".format(
-            type(self).__name__, attr))
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
 
     def __str__(self):
         loss_str = []
         for name, meter in self.meters.items():
-            loss_str.append(
-                "{}: {}".format(name, str(meter))
-            )
+            loss_str.append(f"{name}: {str(meter)}")
         return self.delimiter.join(loss_str)
 
     def synchronize_between_processes(self):
@@ -104,52 +142,101 @@ class MetricLogger(object):
     def log_every(self, iterable, print_freq, header=None):
         i = 0
         if not header:
-            header = ''
+            header = ""
         start_time = time.time()
         end = time.time()
-        iter_time = SmoothedValue(fmt='{avg:.4f}')
-        data_time = SmoothedValue(fmt='{avg:.4f}')
-        space_fmt = ':' + str(len(str(len(iterable)))) + 'd'
+        iter_time = SmoothedValue(fmt="{avg:.4f}")
+        data_time = SmoothedValue(fmt="{avg:.4f}")
+        space_fmt = ":" + str(len(str(len(iterable)))) + "d"
         if torch.cuda.is_available():
-            log_msg = self.delimiter.join([
-                header,
-                '[{0' + space_fmt + '}/{1}]',
-                'eta: {eta}',
-                '{meters}',
-                'time: {time}',
-                'data: {data}',
-                'max mem: {memory:.0f}'
-            ])
+            log_msg = self.delimiter.join(
+                [
+                    header,
+                    "[{0" + space_fmt + "}/{1}]",
+                    "eta: {eta}",
+                    "{meters}",
+                    "time: {time}",
+                    "data: {data}",
+                    "max mem: {memory:.0f}",
+                ]
+            )
         else:
-            log_msg = self.delimiter.join([
-                header,
-                '[{0' + space_fmt + '}/{1}]',
-                'eta: {eta}',
-                '{meters}',
-                'time: {time}',
-                'data: {data}'
-            ])
+            log_msg = self.delimiter.join(
+                [header, "[{0" + space_fmt + "}/{1}]", "eta: {eta}", "{meters}", "time: {time}", "data: {data}"]
+            )
         MB = 1024.0 * 1024.0
         for obj in iterable:
             data_time.update(time.time() - end)
             yield obj
             iter_time.update(time.time() - end)
-            if i % print_freq == 0:
+            if i % print_freq == 0 or i == len(iterable) - 1:
                 eta_seconds = iter_time.global_avg * (len(iterable) - i)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                 if torch.cuda.is_available():
-                    print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
-                        meters=str(self),
-                        time=str(iter_time), data=str(data_time),
-                        memory=torch.cuda.max_memory_allocated() / MB))
+                    print(
+                        log_msg.format(
+                            i,
+                            len(iterable),
+                            eta=eta_string,
+                            meters=str(self),
+                            time=str(iter_time),
+                            data=str(data_time),
+                            memory=torch.cuda.max_memory_allocated() / MB,
+                        )
+                    )
                 else:
-                    print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
-                        meters=str(self),
-                        time=str(iter_time), data=str(data_time)))
+                    print(
+                        log_msg.format(
+                            i, len(iterable), eta=eta_string, meters=str(self), time=str(iter_time), data=str(data_time)
+                        )
+                    )
             i += 1
             end = time.time()
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print('{} Total time: {}'.format(header, total_time_str))
+        print(f"{header} Total time: {total_time_str} ({total_time / len(iterable):.4f} s / it)")
+
+
+def accuracy(output, target, topk=(1,)):
+    """Computes the precision@k for the specified values of k"""
+    maxk = max(topk)
+    batch_size = target.size(0)
+    _, pred = output.topk(maxk, 1, True, True)
+    pred = pred.t()
+    with torch.no_grad():
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+    return [correct[:k].view(-1).float().sum(0) * 100. / batch_size for k in topk]
+
+
+def average_precision(output, target):
+    # sort examples
+    indices = output.argsort()[::-1]
+    # Computes prec@i
+    total_count_ = np.cumsum(np.ones((len(output), 1)))
+    target_ = target[indices]
+    ind = target_ == 1
+    pos_count_ = np.cumsum(ind)
+    total = pos_count_[-1]
+    pos_count_[np.logical_not(ind)] = 0
+    pp = pos_count_ / total_count_
+    precision_at_i_ = np.sum(pp)
+    precision_at_i = precision_at_i_/(total + epsilon)
+    return precision_at_i
+
+
+def mAP(targs, preds):
+    """Returns the model's average precision for each class
+    Return:
+        ap (FloatTensor): 1xK tensor, with avg precision for each class k
+    """
+    if np.size(preds) == 0:
+        return 0
+    ap = np.zeros((preds.shape[1]))
+    # compute average precision for each class
+    for k in range(preds.shape[1]):
+        # sort scores
+        scores = preds[:, k]
+        targets = targs[:, k]
+        # compute average precision
+        ap[k] = average_precision(scores, targets)
+    return 100*ap.mean()

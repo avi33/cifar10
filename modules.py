@@ -11,6 +11,16 @@ def create_net(args):
     net = Net()
     return net
 
+class Sine(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+    def forward(self, x):
+        x_min = x.min(dim=-1, keepdim=True)[0]
+        x_max = x.max(dim=-1, keepdim=True)[0]
+        x = (x-x_min) / (x_max-x_min+1e-4)
+        x = torch.sin(1e-4+x*np.pi/2-1e-4)
+        return x
+
 class FastGlobalAvgPool2d(nn.Module):
     def __init__(self, flatten=False):
         super(FastGlobalAvgPool2d, self).__init__()
@@ -92,58 +102,42 @@ class ResBlock(nn.Module):
     def forward(self, x):
         return self.shortcut(x) + self.block(x)
 
-class Net(nn.Module):    
+class Net(nn.Module):
     def __init__(self):
         super().__init__()
-        ngf = 32        
-        model = []
-        model += [
+        nf = 32        
+        model = [
             nn.ReflectionPad2d(1),
-            nn.Conv2d(in_channels=3, out_channels=ngf, kernel_size=3, stride=1, padding=0, bias=False),
-            nn.BatchNorm2d(ngf),
-            nn.LeakyReLU(0.2, True),
-
+            nn.Conv2d(in_channels=3, out_channels=nf, kernel_size=3, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(nf),
+            Sine(),#nn.LeakyReLU(0.2, True),
+            
             nn.ReflectionPad2d(1),
-            nn.Conv2d(in_channels=ngf, out_channels=ngf, kernel_size=3, stride=1, padding=0, bias=False),
-            nn.BatchNorm2d(ngf),
-            nn.LeakyReLU(0.2, True),
-
-            nn.ReflectionPad2d(1),
-            nn.Conv2d(in_channels=ngf, out_channels=ngf, kernel_size=3, stride=1, padding=0, bias=False),
-            nn.BatchNorm2d(ngf),
-            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(in_channels=nf, out_channels=nf, kernel_size=3, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(nf),
+            Sine(),#nn.LeakyReLU(0.2, True)
+            ]                
+        for k in range(4):
+            nf_out = int(1.6*nf)
+            model += [            
+                nn.ReflectionPad2d(1),
+                nn.Conv2d(nf, nf_out, 3, stride=1),
+                nn.BatchNorm2d(nf_out),
+                Sine(),#nn.LeakyReLU(0.2, True),
+                AntiAliasDownsampleLayer(channels=nf_out),                
             ]
-        self.conv_stack = nn.Sequential(*model)
+            nf = nf_out
         
-        model = []
-        for k in range(3):
-          model += [            
-              nn.ReflectionPad2d(1),
-              nn.Conv2d(ngf, ngf*2, 3, stride=1),
-              AntiAliasDownsampleLayer(channels=ngf*2),
-              nn.BatchNorm2d(ngf*2),
-              nn.LeakyReLU(0.2, True),            
-              ResBlock(dim=ngf*2, dilation=1),
-              ResBlock(dim=ngf*2, dilation=3)
-          ]
-          ngf *= 2
-        self.down = nn.Sequential(*model)        
+        self.backbone = nn.Sequential(*model)             
         model = [
             FastGlobalAvgPool2d(flatten=True),
-            nn.Linear(ngf, 64),
-            TanhFixedPointLayer(64),
-            nn.Linear(64, 10),
-            # nn.BatchNorm1d(64),
-            # nn.LeakyReLU(0.2, True),
-            # nn.Linear(64, 10),
+            nn.Linear(nf, 10)
         ]
         self.dense = nn.Sequential(*model)
-        self.apply(weights_init)
         
     def forward(self, x):        
-        y = self.conv_stack(x)
-        y = self.down(y)
-        y = self.dense(y)  
+        x = self.backbone(x)
+        y = self.dense(x)
         return y
 
 if __name__ == "__main__":
