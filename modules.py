@@ -110,12 +110,12 @@ class Net(nn.Module):
             nn.ReflectionPad2d(1),
             nn.Conv2d(in_channels=3, out_channels=nf, kernel_size=3, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(nf),
-            Sine(),#nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2, True),
             
             nn.ReflectionPad2d(1),
             nn.Conv2d(in_channels=nf, out_channels=nf, kernel_size=3, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(nf),
-            Sine(),#nn.LeakyReLU(0.2, True)
+            nn.LeakyReLU(0.2, True)
             ]                
         for k in range(4):
             nf_out = int(1.6*nf)
@@ -123,7 +123,7 @@ class Net(nn.Module):
                 nn.ReflectionPad2d(1),
                 nn.Conv2d(nf, nf_out, 3, stride=1),
                 nn.BatchNorm2d(nf_out),
-                Sine(),#nn.LeakyReLU(0.2, True),
+                nn.LeakyReLU(0.2, True),
                 AntiAliasDownsampleLayer(channels=nf_out),                
             ]
             nf = nf_out
@@ -139,6 +139,7 @@ class Net(nn.Module):
         x = self.backbone(x)
         y = self.dense(x)
         return y
+
 
 if __name__ == "__main__":
     b = 2

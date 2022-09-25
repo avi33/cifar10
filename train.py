@@ -34,7 +34,8 @@ def parse_args():
     parser.add_argument("--load_path", default=None, type=Path)
     parser.add_argument("--save_interval", default=100, type=int)    
     parser.add_argument("--log_interval", default=100, type=int)
-        
+    '''fitchers'''
+    parser.add_argument("--est_labelnoise", action='store_true', default=True)
     args = parser.parse_args()
     return args
 
@@ -73,7 +74,7 @@ def train():
     '''net'''
     net = create_net(args)
     net.train()
-    net.to(device)    
+    net.to(device)
     '''optimizer'''
     if args.amp:
         from torch.cuda.amp import GradScaler
@@ -92,8 +93,6 @@ def train():
                                                        epochs=args.n_epochs,
                                                        pct_start=0.1,                                                       
                                                     )    
-
-    
     if args.ema:
         from ema import ModelEma as EMA
         ema = EMA(net, decay_per_epoch=args.ema)
@@ -108,9 +107,20 @@ def train():
         loss_cls = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
     else:
         raise ValueError("wrong loss, received {}".format(args.loss_type))
+    loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)
+
+    '''estimate label noise'''
+    if args.est_labelnoise:
+        # from torch.distributions.dirichlet import Dirichlet
+        from dirichlet import EstDirichlet        
+        D = EstDirichlet(n_classes=10, n_iters=100, tol=1e-3)
+        from losses import LabelSmoothDirichletCrossEntropyLoss
+        loss_cls = LabelSmoothDirichletCrossEntropyLoss(reduction="sum").to(device)
+
 
     torch.backends.cudnn.benchmark = True
     best_acc = -1
+    acc_test = 0
     steps = 0        
     skip_scheduler = False
         
@@ -123,7 +133,6 @@ def train():
         print('checkpoints loaded')    
 
     for epoch in range(1, args.n_epochs + 1):
-
         metric_logger = logger.MetricLogger(delimiter="  ")
         metric_logger.add_meter("lr", logger.SmoothedValue(window_size=1, fmt="{value:.6f}"))
         header = f"Epoch: [{epoch}]"
@@ -142,7 +151,12 @@ def train():
             y = y.to(device)
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
-                loss = loss_cls(y_est, y)
+                if args.est_labelnoise and acc_test > 70:
+                    alpha = D(y_est)                    
+                    noise = torch.from_numpy(np.random.dirichlet(alpha.cpu(), size=args.batch_size)).to(device)                    
+                else:
+                    noise = torch.zeros_like(y_est)
+                loss = loss_cls(y_est, y, noise)
 
             if args.amp:
                 scaler.scale(loss_cls).backward()
@@ -163,7 +177,7 @@ def train():
                 lr_scheduler.step()
             
             '''metrics'''            
-            acc = logger.accuracy(y_est, target=y, topk=(1,))[0]            
+            acc = logger.accuracy(y_est, target=y, topk=(1,))[0]
             
             metric_logger.update(loss=loss.item())
             metric_logger.update(acc=acc)
@@ -186,7 +200,7 @@ def train():
                         x = x.to(device)
                         y = y.to(device)
                         y_est = net(x)
-                        loss_test += loss_cls(y_est, y).item()
+                        loss_test += loss_ce(y_est, y).item()
                         acc_test += logger.accuracy(y_est, target=y, topk=(1, ))[0]
                                 
                 loss_test /= len(test_loader)

@@ -1,4 +1,6 @@
-__pycache__/*
-venv/*
-outputs/*
+__pycache__
+venv
+outputs
 */*.pt
+ww-img
+data/
