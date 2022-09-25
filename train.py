@@ -34,8 +34,7 @@ def parse_args():
     parser.add_argument("--load_path", default=None, type=Path)
     parser.add_argument("--save_interval", default=100, type=int)    
     parser.add_argument("--log_interval", default=100, type=int)
-    '''fitchers'''
-    parser.add_argument("--est_labelnoise", action='store_true', default=True)
+
     args = parser.parse_args()
     return args
 
@@ -101,22 +100,19 @@ def train():
 
     '''loss'''
     if args.loss_type == "ce":
-        loss_cls = nn.CrossEntropyLoss(reduction="sum").to(device)
+        criterion = nn.CrossEntropyLoss(reduction="sum").to(device)
     elif args.loss_type == 'label_smooth':
         from losses import LabelSmoothCrossEntropyLoss
-        loss_cls = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
-    else:
-        raise ValueError("wrong loss, received {}".format(args.loss_type))
-    loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)
-
-    '''estimate label noise'''
-    if args.est_labelnoise:
-        # from torch.distributions.dirichlet import Dirichlet
+        criterion = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
+    elif args.loss_type == 'label_smooth_dirichlet':
         from dirichlet import EstDirichlet        
         D = EstDirichlet(n_classes=10, n_iters=100, tol=1e-3)
         from losses import LabelSmoothDirichletCrossEntropyLoss
-        loss_cls = LabelSmoothDirichletCrossEntropyLoss(reduction="sum").to(device)
-
+        criterion = LabelSmoothDirichletCrossEntropyLoss(reduction="sum").to(device)
+    else:
+        raise ValueError("wrong loss, received {}".format(args.loss_type))
+    
+    loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)
 
     torch.backends.cudnn.benchmark = True
     best_acc = -1
@@ -130,7 +126,7 @@ def train():
         opt.load_state_dict(checkpoint['opt_dict'])
         steps = checkpoint['resume_step'] if 'resume_step' in checkpoint.keys() else 0
         best_acc = checkpoint['best_acc']
-        print('checkpoints loaded')    
+        print('checkpoints loaded')
 
     for epoch in range(1, args.n_epochs + 1):
         metric_logger = logger.MetricLogger(delimiter="  ")
@@ -151,15 +147,17 @@ def train():
             y = y.to(device)
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
-                if args.est_labelnoise and acc_test > 70:
-                    alpha = D(y_est)                    
-                    noise = torch.from_numpy(np.random.dirichlet(alpha.cpu(), size=args.batch_size)).to(device)                    
-                else:
+                if args.loss_type == 'label_smooth_dirichlet':
                     noise = torch.zeros_like(y_est)
-                loss = loss_cls(y_est, y, noise)
+                    if metric_logger.meters['acc'].deque[0] > 60:
+                        alpha = D(y_est)                    
+                        noise = torch.from_numpy(np.random.dirichlet(alpha.cpu(), size=args.batch_size)).to(device)
+                    loss = criterion(y_est, y, noise)
+                else:
+                    loss = criterion(y_est, y)
 
             if args.amp:
-                scaler.scale(loss_cls).backward()
+                scaler.scale(criterion).backward()
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1)
                 scaler.step(opt)
