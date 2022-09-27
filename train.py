@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument('--ema', default=0.995, type=float)
     parser.add_argument("--amp", action='store_true', default=False)
     '''loss'''
-    parser.add_argument("--loss_type", default="ce", type=str)
+    parser.add_argument("--loss_type", default="label_smooth_dirichlet", type=str)
     '''debug'''
     parser.add_argument("--save_path", default='outputs/tmp', type=Path)
     parser.add_argument("--load_path", default=None, type=Path)
@@ -108,7 +108,9 @@ def train():
         from dirichlet import EstDirichlet        
         D = EstDirichlet(n_classes=10, n_iters=100, tol=1e-3)
         from losses import LabelSmoothDirichletCrossEntropyLoss
-        criterion = LabelSmoothDirichletCrossEntropyLoss(reduction="sum").to(device)
+        # criterion = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
+        criterion = LabelSmoothDirichletCrossEntropyLoss(reduction="sum").to(device)      
+        # criterion = nn.NLLLoss(reduction="sum").to(device)
     else:
         raise ValueError("wrong loss, received {}".format(args.loss_type))
     
@@ -119,7 +121,8 @@ def train():
     acc_test = 0
     steps = 0        
     skip_scheduler = False
-        
+    start_est = False
+
     if load_root and load_root.exists():
         checkpoint = torch.load(load_root / "chkpnt.pt")
         net.load_state_dict(checkpoint['model_dict'])
@@ -139,8 +142,7 @@ def train():
             ema.decay_per_epoch = decay_per_epoch_orig
         epochs_from_last_reset += 1
         # set 'decay_per_step' for the eooch
-        ema.set_decay_per_step(len(train_loader))
-        
+        ema.set_decay_per_step(len(train_loader))        
         for iterno, (x, y) in  enumerate(metric_logger.log_every(train_loader, args.log_interval, header)):        
             net.zero_grad(set_to_none=True)
             x = x.to(device)            
@@ -148,11 +150,12 @@ def train():
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
                 if args.loss_type == 'label_smooth_dirichlet':
-                    noise = torch.zeros_like(y_est)
-                    if metric_logger.meters['acc'].deque[0] > 60:
+                    noise = torch.zeros_like(y_est)                    
+                    if start_est:
                         alpha = D(y_est)                    
-                        noise = torch.from_numpy(np.random.dirichlet(alpha.cpu(), size=args.batch_size)).to(device)
+                        noise = torch.from_numpy(np.random.dirichlet(alpha.cpu(), size=args.batch_size)).to(device)                        
                     loss = criterion(y_est, y, noise)
+                    # + (-noise*torch.log(noise+1e-6)).sum(-1).sum(0)
                 else:
                     loss = criterion(y_est, y)
 
@@ -176,6 +179,8 @@ def train():
             
             '''metrics'''            
             acc = logger.accuracy(y_est, target=y, topk=(1,))[0]
+            if args.loss_type == 'label_smooth_dirichlet' and acc > 60:
+                start_est = True
             
             metric_logger.update(loss=loss.item())
             metric_logger.update(acc=acc)

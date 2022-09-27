@@ -31,7 +31,7 @@ class EstDirichlet(nn.Module):
                 if torch.norm(a-self.a, 1) < self.tol:
                     break            
                 self.a = a
-        return a
+        return a.float()
 
 
 if __name__ == "__main__":    

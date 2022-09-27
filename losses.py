@@ -46,12 +46,14 @@ class LabelSmoothDirichletCrossEntropyLoss(_WeightedLoss):
     @staticmethod
     def _smooth_one_hot(targets: torch.Tensor, n_classes: int, label_noise=None):
         with torch.no_grad():
-            if label_noise is not None:
-                # targets = F.one_hot()
+            if label_noise is not None:                                
                 targets = torch.empty(size=(targets.size(0), n_classes),
                                     device=targets.device) \
                     .fill_(0).scatter_(1, targets.data.unsqueeze(1), 1.)
-                targets.add_(label_noise)
+                idx = targets==1
+                targets[idx] == 1-label_noise[idx].float()
+                targets[torch.logical_not(idx)] == label_noise[torch.logical_not(idx)].float()
+                # targets = (1-label_noise)*(targets==1) + label_noise * (targets!=1)
         return targets
 
     def forward(self, inputs, targets, noise):
