@@ -2,13 +2,14 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
-from torch.nn.modules.activation import LeakyReLU
-from torch.nn.modules.padding import ReflectionPad1d
-from torch.nn.utils import weight_norm
 import torch.nn.init as init
+from modules.space_to_depth import SpaceToDepthModule
 
 def create_net(args):
-    net = Net()
+    if args.net_type == 'cnn':
+        net = Net()
+    elif args.net_type == 's2d':
+        net = Net2()
     return net
 
 class Sine(nn.Module):
@@ -141,10 +142,34 @@ class Net(nn.Module):
         return y
 
 
+class Net2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        nf = 64
+        self.backbone = nn.Sequential(
+            SpaceToDepthModule(),
+            nn.Conv2d(3*16, nf, 1, 1, 0, bias=False),
+            nn.BatchNorm2d(nf),
+            nn.LeakyReLU(0.2, True),
+
+            SpaceToDepthModule(),
+            nn.Conv2d(nf*16, nf*16, 1, 1, 0, bias=False),
+            nn.BatchNorm2d(nf*16),
+            nn.LeakyReLU(0.2, True),
+            
+            nn.Conv2d(nf*16, 128, 1, 1, 0),
+            FastGlobalAvgPool2d(flatten=True)
+        )        
+        self.dense = nn.Linear(128, 10)
+        
+    def forward(self, x):        
+        x = self.backbone(x)
+        y = self.dense(x)
+        return y
+
 if __name__ == "__main__":
     b = 2
     x = torch.randn(b, 3, 64, 64).cuda()
-    net = Net().cuda()
+    net = Net2().cuda()
     y = net(x)
-    print(y.shape)
-    #torch.save(net.state_dict(), "ff.pt")
+    print(y.shape)    

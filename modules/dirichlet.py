@@ -36,9 +36,12 @@ class EstDirichlet(nn.Module):
 
 if __name__ == "__main__":    
     alpha = [10*0.5, 10*0.5, 0.5]
-    x = torch.from_numpy(np.random.dirichlet(alpha, size=1000))
+    x = torch.from_numpy(np.random.dirichlet(alpha, size=1000)).requires_grad_(True)
     # m = Dirichlet(torch.tensor())
     # x = m.sample(10)
     ED = EstDirichlet(x.shape[-1])
     y = ED(x)
+    # loss = torch.nn.functional.mse_loss(y, torch.from_numpy(alpha))
+    # loss.backward()
+    print(y.grad_fn)
     print(x) 

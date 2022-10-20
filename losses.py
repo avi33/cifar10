@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.loss import _WeightedLoss
+import numpy as np
 
 class LabelSmoothCrossEntropyLoss(_WeightedLoss):
     def __init__(self, weight=None, reduction='mean', smoothing=0.0):
@@ -44,21 +45,35 @@ class LabelSmoothDirichletCrossEntropyLoss(_WeightedLoss):
         self.reduction = reduction
 
     @staticmethod
-    def _smooth_one_hot(targets: torch.Tensor, n_classes: int, label_noise=None):
-        with torch.no_grad():
-            if label_noise is not None:                                
+    def _smooth_one_hot(targets: torch.Tensor, n_classes: int, alpha=None):
+        with torch.no_grad():            
+            if alpha is not None:
+                # oh = torch.empty(size=(targets.size(0), n_classes),
+                #                     device=targets.device) \
+                #     .fill_(0).scatter_(1, targets.data.unsqueeze(1), 1.)
+                # a_mu = alpha / alpha.sum()
+                # aa = torch.gather(a_mu, 0, targets)
+                # a = a_mu.view(1, -1).expand(targets.shape[0], -1)
+                # aa = a[targets]
+                # label_noise = torch.from_numpy(np.random.dirichlet(a_mu.cpu(), size=targets.shape[0])).to(targets.device)
+                # idx = targets==1
+                # targets[idx] == 1-label_noise[idx].float()
+                # targets[torch.logical_not(idx)] == label_noise[torch.logical_not(idx)].float()
                 targets = torch.empty(size=(targets.size(0), n_classes),
-                                    device=targets.device) \
-                    .fill_(0).scatter_(1, targets.data.unsqueeze(1), 1.)
-                idx = targets==1
-                targets[idx] == 1-label_noise[idx].float()
-                targets[torch.logical_not(idx)] == label_noise[torch.logical_not(idx)].float()
-                # targets = (1-label_noise)*(targets==1) + label_noise * (targets!=1)
+                                  device=targets.device) \
+                .fill_(0.1 / (n_classes - 1)) \
+                .scatter_(1, targets.data.unsqueeze(1), 1. - 0.1)
+            else:
+                targets = torch.empty(size=(targets.size(0), n_classes),
+                                  device=targets.device) \
+                .fill_(0.1 / (n_classes - 1)) \
+                .scatter_(1, targets.data.unsqueeze(1), 1. - 0.1)
+                
         return targets
 
-    def forward(self, inputs, targets, noise):
+    def forward(self, inputs, targets, alpha):        
         targets = LabelSmoothDirichletCrossEntropyLoss._smooth_one_hot(targets, inputs.size(-1),
-                                                              noise)
+                                                              alpha)
         lsm = F.log_softmax(inputs, -1)
 
         if self.weight is not None:

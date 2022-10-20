@@ -11,9 +11,10 @@ import numpy as np
 import argparse
 from pathlib import Path
 import torchvision.transforms as T
-from modules.modules import Net, create_net
+from modules import Net
 from helper_funcs import add_weight_decay
 import logger
+from modules import create_net
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -21,8 +22,6 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--n_epochs", default=100, type=int)
-    '''net'''
-    parser.add_argument("--net_type", default="cnn", type=str)
     '''optimizer'''
     parser.add_argument("--max_lr", default=3e-4, type=float)
     parser.add_argument("--wd", default=1e-4, type=float)
@@ -40,7 +39,7 @@ def parse_args():
     return args
 
 def create_dataset(args):
-    train_augs = T.Compose([#T.ColorJitter(hue=.05, saturation=.05),
+    train_augs = T.Compose([T.ColorJitter(hue=.05, saturation=.05),
                             T.RandomHorizontalFlip(p=0.5),
                             T.RandomRotation(degrees=15),
                             T.RandomResizedCrop(size=(32, 32), scale=(0.5, 1.0)),                            
@@ -54,6 +53,13 @@ def create_dataset(args):
     test_set = Dataset(train=False, transform=test_augs, download=True, root='data')
 
     return train_set, test_set
+
+def simple_quant(net, n_bits=None):        
+    import copy
+    netq = copy.deepcopy(net)
+    for name, p in netq.named_parameters():
+        p.data = torch.round(p.data * 2**n_bits) / 2**n_bits
+    return netq
 
 def train():
     args = parse_args()
@@ -72,7 +78,13 @@ def train():
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
     '''net'''
-    net = create_net(args)
+    nett = create_net(args)
+    chkpnt = torch.load(r'outputs/t2-label_smooth/chkpnt.pt', map_location=device)
+    nett.load_state_dict(chkpnt['model_dict'], strict=True)
+    del chkpnt
+    net = simple_quant(nett, 16)
+    nett.eval()
+    nett.to(device)
     net.train()
     net.to(device)
     '''optimizer'''
@@ -93,7 +105,7 @@ def train():
                                                        epochs=args.n_epochs,
                                                        pct_start=0.1,                                                       
                                                     )    
-    if args.ema is not None:
+    if args.ema:
         from ema import ModelEma as EMA
         ema = EMA(net, decay_per_epoch=args.ema)
         epochs_from_last_reset = 0
@@ -106,7 +118,7 @@ def train():
         from losses import LabelSmoothCrossEntropyLoss
         criterion = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
     elif args.loss_type == 'label_smooth_dirichlet':
-        from modules.dirichlet import EstDirichlet        
+        from dirichlet import EstDirichlet        
         D = EstDirichlet(n_classes=10, n_iters=100, tol=1e-3)
         from losses import LabelSmoothDirichletCrossEntropyLoss
         # criterion = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
@@ -149,15 +161,10 @@ def train():
             x = x.to(device)            
             y = y.to(device)
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
-                y_est = net(x)
-                if args.loss_type == 'label_smooth_dirichlet':
-                    noise = torch.zeros_like(y_est)
-                    alpha = None
-                    if start_est:
-                        alpha = D(y_est)
-                    loss = criterion(y_est, y, alpha)
-                else:
-                    loss = criterion(y_est, y)
+                with torch.no_grad():
+                    y_est = nett(x)
+                yq_est = net(x)
+                loss = 5*F.kl_div(yq_est.log_softmax(-1), y_est.softmax(-1), reduction='sum') + F.cross_entropy(yq_est, y, reduction='sum')
 
             if args.amp:
                 scaler.scale(criterion).backward()
@@ -171,7 +178,7 @@ def train():
                 loss.backward()
                 opt.step()
 
-            if args.ema is not None:
+            if args.ema:
                 ema.update(net, steps)
 
             if not skip_scheduler:
@@ -179,9 +186,7 @@ def train():
             
             '''metrics'''            
             acc = logger.accuracy(y_est, target=y, topk=(1,))[0]
-            if args.loss_type == 'label_smooth_dirichlet' and acc > 0:
-                start_est = True
-            
+                        
             metric_logger.update(loss=loss.item())
             metric_logger.update(acc=acc)
             metric_logger.update(lr=opt.param_groups[0]["lr"])                                
@@ -216,7 +221,7 @@ def train():
                 metric_logger.update(acc_test=acc)
                 net.train()                
                 
-                if True:#metric_logger.meters['acc_test'].deque[0] > best_acc:
+                if metric_logger.meters['acc_test'].deque[0] > best_acc:
                     best_acc = metric_logger.meters['acc_test'].deque[0]
                     chkpnt = {
                         'model_dict': net.state_dict(),
