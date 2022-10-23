@@ -11,9 +11,11 @@ import numpy as np
 import argparse
 from pathlib import Path
 import torchvision.transforms as T
-from modules.modules import Net, create_net
+from cifar_quant import save_torchscript_model
+from modules.modules import Net, NetQ, create_net
 from helper_funcs import add_weight_decay
 import logger
+import copy
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -29,13 +31,15 @@ def parse_args():
     parser.add_argument('--ema', default=0.995, type=float)
     parser.add_argument("--amp", action='store_true', default=False)
     '''loss'''
-    parser.add_argument("--loss_type", default="label_smooth_dirichlet", type=str)
+    parser.add_argument("--loss_type", default="label_smooth", type=str)
     '''debug'''
-    parser.add_argument("--save_path", default='outputs/tmp', type=Path)
-    parser.add_argument("--load_path", default=None, type=Path)
+    parser.add_argument("--save_path", default='outputs/quant', type=Path)
+    parser.add_argument("--load_path", default='outputs/quant', type=Path)
     parser.add_argument("--save_interval", default=100, type=int)    
     parser.add_argument("--log_interval", default=100, type=int)
-
+    '''quantization'''
+    parser.add_argument("--quant", action="store_true", default=True)
+    
     args = parser.parse_args()
     return args
 
@@ -50,8 +54,8 @@ def create_dataset(args):
     test_augs = T.Compose([T.ToTensor(), 
                            T.Normalize([0.5]*3, [0.5]*3)])
 
-    train_set = Dataset(train=True, transform=train_augs, download=True, root='data')    
-    test_set = Dataset(train=False, transform=test_augs, download=True, root='data')
+    train_set = Dataset(train=True, transform=train_augs, download=False, root='data')    
+    test_set = Dataset(train=False, transform=test_augs, download=False, root='data')
 
     return train_set, test_set
 
@@ -72,8 +76,21 @@ def train():
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
     '''net'''
-    net = create_net(args)
-    net.train()
+    net = Net()
+    if args.quant:
+        net = NetQ(model_flp=net)
+        # fuse the activations to preceding layers, where applicable
+        # this needs to be done manually depending on the model architecture
+        # fused_model = copy.deepcopy(model)
+                
+        # net_fused = torch.quantization.fuse_modules(net, [['conv', 'bn', 'relu']])
+
+        # Prepare the model for QAT. This inserts observers and fake_quants in
+        # the model that will observe weight and activation tensors during calibration.        
+        net.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        # https://pytorch.org/docs/stable/_modules/torch/quantization/quantize.html#prepare_qat
+        torch.quantization.prepare_qat(net, inplace=True)            
+    # net.train()
     net.to(device)
     '''optimizer'''
     if args.amp:
@@ -93,6 +110,8 @@ def train():
                                                        epochs=args.n_epochs,
                                                        pct_start=0.1,                                                       
                                                     )    
+    if args.quant:
+        args.ema = None
     if args.ema is not None:
         from ema import ModelEma as EMA
         ema = EMA(net, decay_per_epoch=args.ema)
@@ -136,14 +155,14 @@ def train():
         metric_logger = logger.MetricLogger(delimiter="  ")
         metric_logger.add_meter("lr", logger.SmoothedValue(window_size=1, fmt="{value:.6f}"))
         header = f"Epoch: [{epoch}]"
-
-        if epochs_from_last_reset <= 1:  # two first epochs do ultra short-term ema
-            ema.decay_per_epoch = 0.01
-        else:
-            ema.decay_per_epoch = decay_per_epoch_orig
-        epochs_from_last_reset += 1
-        # set 'decay_per_step' for the eooch
-        ema.set_decay_per_step(len(train_loader))        
+        if args.ema is not None:
+            if epochs_from_last_reset <= 1:  # two first epochs do ultra short-term ema
+                ema.decay_per_epoch = 0.01
+            else:
+                ema.decay_per_epoch = decay_per_epoch_orig
+            epochs_from_last_reset += 1
+            # set 'decay_per_step' for the eooch
+            ema.set_decay_per_step(len(train_loader))        
         for iterno, (x, y) in  enumerate(metric_logger.log_every(train_loader, args.log_interval, header)):        
             net.zero_grad(set_to_none=True)
             x = x.to(device)            
@@ -193,16 +212,23 @@ def train():
             writer.add_scalar("train/acc1", acc, steps)
             writer.add_scalar("lr", lr_scheduler.get_last_lr()[0], steps)            
 
-            steps += 1            
-            acc_test = 0
-            loss_test = 0
-            if steps % args.save_interval == 0:                
-                with torch.no_grad():
-                    net.eval()
-                    for i, (x, y) in enumerate(test_loader):
-                        x = x.to(device)
-                        y = y.to(device)
-                        y_est = net(x)
+            steps += 1                        
+            if steps % args.save_interval == 0:
+                acc_test = 0
+                loss_test = 0
+                net.eval()                
+                if args.quant:
+                    net.cpu()
+                    net_q = torch.quantization.convert(net)
+                    net_q.eval()
+                with torch.no_grad():                                        
+                    for i, (x, y) in enumerate(test_loader):                        
+                        if args.quant:
+                            y_est = net_q(x)
+                        else:
+                            x = x.to(device)
+                            y = y.to(device)
+                            y_est = net(x)
                         loss_test += loss_ce(y_est, y).item()
                         acc_test += logger.accuracy(y_est, target=y, topk=(1, ))[0]
                                 
@@ -214,17 +240,20 @@ def train():
 
                 metric_logger.update(loss_test=loss_test)
                 metric_logger.update(acc_test=acc)
+                if args.quant:
+                    net.to(device)
                 net.train()                
-                
-                if True:#metric_logger.meters['acc_test'].deque[0] > best_acc:
-                    best_acc = metric_logger.meters['acc_test'].deque[0]
-                    chkpnt = {
-                        'model_dict': net.state_dict(),
-                        'opt_dict': opt.state_dict(),
-                        'step': steps,
-                        'best_acc': acc                        
-                    }
-                    torch.save(chkpnt, root / "chkpnt.pt")
+                                
+                best_acc = metric_logger.meters['acc_test'].deque[0]
+                chkpnt = {
+                    'model_dict': net.state_dict(),
+                    'opt_dict': opt.state_dict(),
+                    'step': steps,
+                    'best_acc': acc                        
+                }
+                if args.quant:
+                    save_torchscript_model(net_q, args.save_path, "net_q_jit.pt")
+                torch.save(chkpnt, root / "chkpnt.pt")
 
 if __name__ == "__main__":
     train()
