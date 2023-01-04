@@ -16,7 +16,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--f_res", default='outputs/quant', type=Path)    
+    parser.add_argument("--f_res", default='outputs/quant', type=Path)
     args = parser.parse_args()
     return args
 
@@ -37,31 +37,12 @@ def inference_cifar():
                             num_workers=4, 
                             pin_memory=True)
     
-    from modules.modules import Net, NetQ    
-    net = Net()    
-    if args.quant:
-        device = torch.device("cpu")
-        # net = NetQ(model_flp=net).to(device)                
-        # net.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        # net = torch.quantization.convert(net, inplace=True)
-        net = load_torchscript_model(args.f_res / 'net_q_jit.pt', device=device)
-        net.eval()
-        # net = chkpnt['model_dict_quant']
-        # net.to(device)        
-        # net.quant.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        # torch.quantization.prepare_qat(net, inplace=True)                
-        # chkpnt = torch.load(args.f_res / 'chkpnt.pt', map_location=torch.device(device))        
-        # net = torch.quantization.convert(net, inplace=True)
-        # net.load_state_dict(chkpnt['model_dict'], strict=True)
-        # net.eval()
-        # save_torchscript_model(model=net, model_dir=args.save_path, model_filename="model_quant_jit.pt")
-        # net = load_torchscript_model(model_filepath=os.path.join(args.save_path, "model_quant_jit.pt"), device=device)
-    else:
-        net.eval()
-        net.to(device)
-        chkpnt = torch.load(args.f_res / 'chkpnt.pt', map_location=torch.device(device))
-        net.load_state_dict(chkpnt['model_dict'], strict=True)
-        del chkpnt
+    from modules.models import Net    
+    net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type)
+    net.eval()
+    net.to(device)
+    chkpnt = torch.load(args.f_res / 'chkpnt.pt', map_location=torch.device(device))
+    net.load_state_dict(chkpnt['model_dict'], strict=True)    
     acc = 0
     for i, (x, y) in enumerate(test_loader):
         if i % 10 == 0:

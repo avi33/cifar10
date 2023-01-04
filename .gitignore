@@ -5,3 +5,4 @@ outputs
 */*.pt
 ww-img
 data/
+.vscode/

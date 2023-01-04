@@ -62,3 +62,17 @@ class AntiAliasDownsampleLayer(nn.Module):
 
     def forward(self, x):
         return self.op(x)
+
+class Down(nn.Module):
+    def __init__(self, nf, kernel_size, stride) -> None:
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(nf, nf*2, kernel_size=kernel_size, stride=1, bias=False, padding=kernel_size//2, padding_mode="reflect"),
+            nn.BatchNorm2d(nf*2),
+            nn.LeakyReLU(0.2, True),
+            AntiAliasDownsampleLayer(channels=nf*2, stride=stride, filt_size=kernel_size)
+        )
+
+    def forward(self, x):
+        x = self.block(x)
+        return x
