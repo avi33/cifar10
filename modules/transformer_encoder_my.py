@@ -68,7 +68,7 @@ class MultiHeadAttention(nn.Module):
     
 
     def forward(self, X_q, X_k, X_v):
-        # batch_size, seq_length, dim = X_q.size()
+        batch_size, seq_length, dim = X_q.size()
 
         # After transforming, split into num_heads 
         Q = self.split_heads(self.W_q(X_q), batch_size)  # (bs, n_heads, q_length, dim_per_head)
