@@ -92,7 +92,10 @@ def train():
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
     '''net'''
     from modules.models import Net
-    net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type)
+    # net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type)
+    # from RepVGG.repvggplus import create_RepVGGplus_by_name
+    # net = create_RepVGGplus_by_name("RepVGG-A1", deploy=False, use_checkpoint=False)
+    net.Linear = nn.Linear(1280, args.n_classes)
     net.to(device)
     
     '''optimizer'''

@@ -4,8 +4,6 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import torch.nn.init as init
-from modules.space_to_depth import SpaceToDepth
-from modules.average_pooling import FastGlobalAvgPool2d
 from modules.anti_aliasing_downsample import Down
 from modules.res_block import ResBlock
 

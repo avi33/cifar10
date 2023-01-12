@@ -100,7 +100,7 @@ class CNN(nn.Module):
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             with torch.no_grad():
-                # m.weight.data.normal_(0.0, 0.02)
+                m.weight.data.normal_(0.0, 0.04)
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.)
@@ -108,14 +108,14 @@ class CNN(nn.Module):
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             with torch.no_grad():
-                nn.init.xavier_uniform_(m.weight)
-                # m.weight.data.normal_(0.0, 0.02)
+                # nn.init.xavier_uniform_(m.weight)
+                m.weight.data.normal_(0.0, 0.04)
                 if m.bias is not None:                    
                     nn.init.constant_(m.weight, 1)
         
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
+            m.weight.data.normal_(0.0, 0.04)
         
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -127,7 +127,7 @@ class CNN(nn.Module):
         
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
+            m.weight.data.normal_(0.0, 0.04)
     
     def forward(self, x):
         x = self.k1convL1(x)
@@ -159,7 +159,7 @@ class TFEncoderLayer(nn.Module):
         
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)    
+            m.weight.data.normal_(0.0, 0.04)
     
     def forward(self, x):
         

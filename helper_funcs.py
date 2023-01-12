@@ -2,6 +2,8 @@ import os
 import torch
 import numpy as np
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def add_weight_decay(model, weight_decay=1e-5, skip_list=()):
     decay = []
