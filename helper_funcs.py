@@ -1,9 +1,46 @@
 import os
 import torch
 import numpy as np
+import copy
+
+def check_fow(net, input_sz):
+    x = torch.randn(*[1, input_sz])
+    y = net(x)    
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def measure_inference_time(model, input, repetitions=300, use_16b=False):
+    device = torch.device("cuda")
+    model_= copy.deepcopy(model)
+    model_.eval()
+    starter = torch.cuda.Event(enable_timing=True)
+    ender = torch.cuda.Event(enable_timing=True)
+    # repetitions = 300
+    timings = np.zeros((repetitions, 1))
+    print(input.shape)
+    if use_16b:
+        input = input.half()
+        model_.half()
+    else:
+        pass
+    input = input.to(device)
+    model_.to(device)
+    for _ in range(10):
+        _ = model_(input)
+    with torch.no_grad():
+        # GPU-WARM-UP
+        for rep in range(repetitions):
+            starter.record()
+            _ = model_(input)
+            ender.record()
+            # WAIT FOR GPU SYNC
+            torch.cuda.synchronize()
+            curr_time = starter.elapsed_time(ender)
+            timings[rep] = curr_time
+    mean_syn = np.sum(timings) / repetitions
+    std_syn = np.std(timings)
+    return mean_syn, std_syn
 
 def add_weight_decay(model, weight_decay=1e-5, skip_list=()):
     decay = []

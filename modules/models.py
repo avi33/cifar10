@@ -8,15 +8,15 @@ from modules.anti_aliasing_downsample import Down
 from modules.res_block import ResBlock
 
 class CNN(nn.Module):
-    def __init__(self, nf) -> None:
+    def __init__(self, nf, factors=[2, 2, 2]) -> None:
         super().__init__()
         block = [
             nn.Conv2d(3, nf, 5, 1, padding=2, padding_mode="reflect", bias=False),
             nn.BatchNorm2d(nf),
             nn.LeakyReLU(0.2, True)            
         ]
-        for k in range(3):
-            block += [Down(nf, kernel_size=3, stride=2)]
+        for _, f in enumerate(factors):
+            block += [Down(nf, kernel_size=f+1, stride=f)]
             nf *= 2
             block += [ResBlock(dim=nf, dilation=1), 
                       ResBlock(dim=nf, dilation=3)]            
@@ -56,11 +56,13 @@ class TFAggregation(nn.Module):
         return out
 
 class Net(nn.Module):
-    def __init__(self, emb_dim, n_classes, nf, tf_type) -> None:
+    def __init__(self, emb_dim, n_classes, nf, factors, tf_type, inp_sz) -> None:
         super().__init__()
         self.nf = nf
-        self.cnn = CNN(nf=16)
-        self.tf = TFAggregation(seq_len=16, emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1, tf_type=tf_type)                        
+        self.cnn = CNN(nf=16, factors=factors)
+        seq_len = inp_sz[0]*inp_sz[1] // (np.prod(factors)**2)
+        self.proj_emb = nn.Conv2d(nf*2**len(factors), emb_dim, 1, 1, groups=emb_dim)
+        self.tf = TFAggregation(seq_len=seq_len, emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1, tf_type=tf_type)                        
         self.project = nn.Linear(emb_dim, n_classes)
 
     def forward(self, x):
@@ -71,22 +73,50 @@ class Net(nn.Module):
 
 if __name__ == "__main__":    
     b = 2
-    x = torch.randn(b, 3, 64, 64).cuda()
-    net = CNN(nf=16).cuda()
-    y = net(x)
-    print(y.shape)
+    # x = torch.randn(b, 3, 64, 64).cuda()
+    # net = CNN(nf=16).cuda()
+    # y = net(x)
+    # print(y.shape)
 
-    x = torch.randn(b, 128, 8, 8).cuda()
-    net = TFAggregation(64, 128, 128*4, 2, 4, 0.1, "torch").cuda()
-    y = net(x)
-    print(y.shape)
+    # x = torch.randn(b, 128, 8, 8).cuda()
+    # net = TFAggregation(64, 128, 128*4, 2, 4, 0.1, "torch").cuda()
+    # y = net(x)
+    # print(y.shape)
 
 
-    x = torch.randn(b, 3, 64, 64).cuda()
-    net = Net(nf=16, emb_dim=128, n_classes=10, tf_type="torch").cuda()
-    y = net(x)
-    print(y.shape)
+    # x = torch.randn(b, 3, 64, 64).cuda()
+    # net = Net(nf=16, emb_dim=128, n_classes=10, tf_type="torch").cuda()
+    # y = net(x)
+    # print(y.shape)
+    from helper_funcs import count_parameters, measure_inference_time
 
-    net = Net(nf=16, emb_dim=128, n_classes=10, tf_type="my").cuda()
+    if False:
+        #CIFAR
+        x = torch.randn(b, 3, 32, 32).cuda()
+        net = Net(nf=16, emb_dim=128, factors=[2, 2, 2], n_classes=10, tf_type="my", inp_sz=(32, 32)).cuda()
+        y = net(x)
+        print(count_parameters(net)/1e6)
+        print(y.shape)
+        t = measure_inference_time(net, x)
+        print("inference time :{}+-{}".format(t[0], t[1]))
+    
+    #COCO
+    x = torch.randn(b, 3, 640, 480).cuda()
+    net = Net(nf=16, emb_dim=128, factors=[2, 2, 4], n_classes=80, tf_type="my", inp_sz=(640, 480)).cuda()
+    net.eval()
     y = net(x)
-    print(y.shape)
+    print(y.shape)    
+    print(count_parameters(net)/1e6)    
+    t = measure_inference_time(net, x)        
+    print("inference time :{}+-{}".format(t[0], t[1]))
+
+    from RepVGG.repvggplus import create_RepVGGplus_by_name
+    net = create_RepVGGplus_by_name("RepVGG-A1", deploy=True, use_checkpoint=False)    
+    net.Linear = nn.Linear(1280, 80)
+    net.eval()
+    net.to("cuda")
+    y = net(x)
+    print(y.shape)    
+    print(count_parameters(net)/1e6)    
+    t = measure_inference_time(net, x)        
+    print("inference time :{}+-{}".format(t[0], t[1]))
