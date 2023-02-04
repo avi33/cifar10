@@ -3,10 +3,6 @@ import torch
 import numpy as np
 import copy
 
-def check_fow(net, input_sz):
-    x = torch.randn(*[1, input_sz])
-    y = net(x)    
-
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -91,3 +87,14 @@ def model_equivalence(model_1, model_2, input_size, device, rtol=1e-05, atol=1e-
             print(y2)
             return False
     return True
+
+def check_receptivefield(net, x):    
+    x.requires_grad_(True)
+    y = net.cnn(x)
+    _, c, w, h = y.shape
+    grad = y[:, :, w//2, h//2].abs().sum().backward()
+    idx = torch.nonzero(x.grad > 0)
+    i1 = max(idx[:, -2])-min(idx[:, -2]) + 1
+    i2 = max(idx[:, -1])-min(idx[:, -1]) + 1
+    rf = (i1, i2)
+    return rf
