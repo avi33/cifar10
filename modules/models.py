@@ -37,7 +37,8 @@ class TFAggregation(nn.Module):
             from modules.transformer_encoder_my import TFEncoder
             self.tf = TFEncoder(num_layers=n_layers, num_heads=n_heads, d_model=emb_dim, ff_hidden_dim=ff_dim, p=p, norm=nn.LayerNorm(emb_dim))
         self.cls_token = self.cls_token = nn.Parameter(torch.zeros(1, 1, emb_dim))
-        self.pos_emb = nn.Conv1d(seq_len+1, seq_len+1, 1, 1, groups=seq_len+1)
+        # self.pos_emb = nn.Conv1d(seq_len+1, seq_len+1, 1, 1, groups=seq_len+1)
+        self.pos_emb = nn.Parameter(torch.zeros(1, seq_len + 1, emb_dim))
         self._reset_parameters()
         
     def _reset_parameters(self):
@@ -50,7 +51,7 @@ class TFAggregation(nn.Module):
         x = x.view(x.shape[0], self.emb_dim, -1).transpose(2, 1).contiguous()
         cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.pos_emb(x)
+        x += self.pos_emb#self.pos_emb(x)
         x = self.tf(x)
         out = x[:, 0, :]
         return out
@@ -74,24 +75,16 @@ class Net(nn.Module):
 if __name__ == "__main__":    
     from helper_funcs import count_parameters, measure_inference_time, check_receptivefield
     b = 1
-    # x = torch.randn(b, 3, 64, 64).cuda()
-    # net = CNN(nf=16).cuda()
-    # y = net(x)
-    # print(y.shape)
-
-    # x = torch.randn(b, 128, 8, 8).cuda()
-    # net = TFAggregation(64, 128, 128*4, 2, 4, 0.1, "torch").cuda()
-    # y = net(x)
-    # print(y.shape)
-
-    x = torch.randn(b, 3, 32, 128).cuda()
-    net = Net(nf=16, emb_dim=128, n_classes=10, tf_type="my", factors=[2, 2, 2], inp_sz=(32, 128)).cuda()
-    y = net(x)
-    print(y.shape)    
-    print(count_parameters(net)/1e6)    
-    t = measure_inference_time(net, x)        
-    print("inference time :{}+-{}".format(t[0], t[1]))
-    print(check_receptivefield(net, x))
+    
+    if False:
+        x = torch.randn(b, 3, 32, 128).cuda()
+        net = Net(nf=16, emb_dim=128, n_classes=10, tf_type="my", factors=[2, 2, 2], inp_sz=(32, 128)).cuda()
+        y = net(x)
+        print(y.shape)    
+        print(count_parameters(net)/1e6)    
+        t = measure_inference_time(net, x)        
+        print("inference time :{}+-{}".format(t[0], t[1]))
+        print(check_receptivefield(net, x))
     if False:
         #CIFAR
         x = torch.randn(b, 3, 32, 32).cuda()
@@ -102,10 +95,10 @@ if __name__ == "__main__":
         t = measure_inference_time(net, x)
         print("inference time :{}+-{}".format(t[0], t[1]))
     
-    if False:
+    if True:
         #COCO
-        x = torch.randn(b, 3, 640, 480).cuda()
-        net = Net(nf=16, emb_dim=128, factors=[2, 2, 4], n_classes=80, tf_type="my", inp_sz=(640, 480)).cuda()
+        x = torch.randn(b, 3, 640, 640).cuda()
+        net = Net(nf=16, emb_dim=128, factors=[4, 4, 4], n_classes=80, tf_type="my", inp_sz=(640, 640)).cuda()
         net.eval()
         y = net(x)
         print(y.shape)    
@@ -113,10 +106,10 @@ if __name__ == "__main__":
         t = measure_inference_time(net, x)        
         print("inference time :{}+-{}".format(t[0], t[1]))
 
-        from RepVGG.repvggplus import create_RepVGGplus_by_name
-        net = create_RepVGGplus_by_name("RepVGG-A1", deploy=True, use_checkpoint=False)    
-        net.Linear = nn.Linear(1280, 80)
-        net.eval()
-        net.to("cuda")
-        y = net(x)
-        print(y.shape)
+        # from RepVGG.repvggplus import create_RepVGGplus_by_name
+        # net = create_RepVGGplus_by_name("RepVGG-A1", deploy=True, use_checkpoint=False)    
+        # net.Linear = nn.Linear(1280, 80)
+        # net.eval()
+        # net.to("cuda")
+        # y = net(x)
+        # print(y.shape)

@@ -91,10 +91,16 @@ def model_equivalence(model_1, model_2, input_size, device, rtol=1e-05, atol=1e-
 def check_receptivefield(net, x):    
     x.requires_grad_(True)
     y = net.cnn(x)
-    _, c, w, h = y.shape
-    grad = y[:, :, w//2, h//2].abs().sum().backward()
-    idx = torch.nonzero(x.grad > 0)
-    i1 = max(idx[:, -2])-min(idx[:, -2]) + 1
-    i2 = max(idx[:, -1])-min(idx[:, -1]) + 1
-    rf = (i1, i2)
+    if len(y.shape) == 4:
+        _, c, w, h = y.shape
+        grad = y[:, :, w//2, h//2].abs().sum().backward()
+        idx = torch.nonzero(x.grad > 0)
+        i1 = max(idx[:, -2])-min(idx[:, -2]) + 1
+        i2 = max(idx[:, -1])-min(idx[:, -1]) + 1
+        rf = (i1, i2)
+    elif len(y.shape) == 3:
+        grad = y[:, :, w//2].abs().sum().backward()
+        idx = torch.nonzero(x.grad > 0)
+        i1 = max(idx[:, -1])-min(idx[:, -1]) + 1
+        rf = i1
     return rf
