@@ -4,7 +4,7 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 from modules.anti_aliasing_downsample import Down
-from modules.average_pooling import FastGlobalAvgPool2d
+from modules.average_pooling import FastGlobalAvgPool
 from modules.res_block import ResBlock
 
 def create_net(args):
@@ -60,7 +60,7 @@ class Net(nn.Module):
         
         self.backbone = nn.Sequential(*model)             
         model = [
-            FastGlobalAvgPool2d(flatten=True),
+            FastGlobalAvgPool(flatten=True),
             nn.Linear(nf, 10)
         ]
         self.dense = nn.Sequential(*model)

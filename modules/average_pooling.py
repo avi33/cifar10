@@ -1,8 +1,8 @@
 import torch.nn as nn
 
-class FastGlobalAvgPool2d(nn.Module):
+class FastGlobalAvgPool(nn.Module):
     def __init__(self, flatten=False):
-        super(FastGlobalAvgPool2d, self).__init__()
+        super(FastGlobalAvgPool, self).__init__()
         self.flatten = flatten
 
     def forward(self, x):

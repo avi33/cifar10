@@ -92,12 +92,12 @@ def train():
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
     '''net'''
     from modules.models import Net    
-    # net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))
+    net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))
     # from RepVGG.repvggplus import create_RepVGGplus_by_name
     # net = create_RepVGGplus_by_name("RepVGG-A1", deploy=False, use_checkpoint=False)
     # net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type)
-    from modules.fftlayer import Net
-    net = Net(nf=16)
+    # from modules.fftlayer import Net
+    # net = Net(nf=16)
     # net.Linear = nn.Linear(1280, args.n_classes)
     net.to(device)
     
@@ -141,8 +141,8 @@ def train():
     else:
         raise ValueError("wrong loss, received {}".format(args.loss_type))
     
-    loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)
-
+    loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)    
+    
     torch.backends.cudnn.benchmark = True
     acc_test = 0
     steps = 0        
@@ -175,7 +175,7 @@ def train():
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
                 loss = criterion(y_est, y)
-
+                
             if args.amp:
                 scaler.scale(criterion).backward()
                 scaler.unscale_(opt)

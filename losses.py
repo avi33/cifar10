@@ -48,17 +48,6 @@ class LabelSmoothDirichletCrossEntropyLoss(_WeightedLoss):
     def _smooth_one_hot(targets: torch.Tensor, n_classes: int, alpha=None):
         with torch.no_grad():            
             if alpha is not None:
-                # oh = torch.empty(size=(targets.size(0), n_classes),
-                #                     device=targets.device) \
-                #     .fill_(0).scatter_(1, targets.data.unsqueeze(1), 1.)
-                # a_mu = alpha / alpha.sum()
-                # aa = torch.gather(a_mu, 0, targets)
-                # a = a_mu.view(1, -1).expand(targets.shape[0], -1)
-                # aa = a[targets]
-                # label_noise = torch.from_numpy(np.random.dirichlet(a_mu.cpu(), size=targets.shape[0])).to(targets.device)
-                # idx = targets==1
-                # targets[idx] == 1-label_noise[idx].float()
-                # targets[torch.logical_not(idx)] == label_noise[torch.logical_not(idx)].float()
                 targets = torch.empty(size=(targets.size(0), n_classes),
                                   device=targets.device) \
                 .fill_(0.1 / (n_classes - 1)) \
@@ -87,5 +76,37 @@ class LabelSmoothDirichletCrossEntropyLoss(_WeightedLoss):
             loss = loss.mean()
         return loss
 
+class ZLPR(nn.Module):
+    def __init__(self, n_classes, is_multilabel=False, reduction="mean") -> None:
+        super().__init__()
+        self.reduction = reduction
+        self.n_classes = n_classes
+        self.is_multilabel = is_multilabel
+
+    def forward(self, pred, target):            
+        if self.is_multilabel:
+            y = [F.one_hot(torch.Tensor(y_i).long(), self.n_classes).sum(dim=0).float() for y_i in y]
+            y = torch.stack(y, dim=0).contiguous()
+        else:            
+            pred = torch.clamp(pred, min=-30, max=30)
+            pred_trg = torch.gather(pred, 1, target.view(-1, 1))
+            loss = torch.log(1+torch.exp(-pred_trg)) + torch.log(1+torch.exp(pred).sum(-1, keepdims=True)-torch.exp(pred_trg))
+            if self.reduction == "sum":
+                loss = loss.sum()
+            elif self.reduction == "mean":
+                loss = loss.mean()
+            elif self.reduction == "none":
+                pass
+            else:
+                raise ValueError("wrong reduction for loss {}".format(self.reduction))
+        return loss
+
 if __name__ == '__main__':
-    pass
+    L = ZLPR(10)
+    pred = torch.randn(1, 10)
+    target = torch.Tensor([2]).long()
+    for k in range(10):
+        pred_ = pred.clone()
+        pred_[:, k] = 10        
+        loss = L(pred_, target)
+        print(loss)
