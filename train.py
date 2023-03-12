@@ -22,7 +22,7 @@ def parse_args():
     parser.add_argument("--n_epochs", default=100, type=int)
     parser.add_argument("--dataset", default="cifar10", type=str)
     '''net'''
-    parser.add_argument("--tf_type", default="torch", type=str)
+    parser.add_argument("--tf_type", default="my", type=str)
     parser.add_argument("--n_classes", default=10, type=int)
     '''optimizer'''
     parser.add_argument("--max_lr", default=3e-4, type=float)
@@ -71,6 +71,13 @@ def create_dataset(args):
         train_set = Dataset(train=True, transform=train_augs, download=False, root='data')    
         test_set = Dataset(train=False, transform=test_augs, download=False, root='data')
 
+    elif args.dataset == 'tinyimagenet':
+        from data import TinyImageNetDataset as Dataset
+        train_set = Dataset(train=True, transform=train_augs, download=False, root='data')    
+        test_set = Dataset(train=False, transform=test_augs, download=False, root='data')
+    
+    else:
+        raise ValueError("wrong dataset {}".format(args.dataset))
     
     return train_set, test_set
 
@@ -146,8 +153,7 @@ def train():
     torch.backends.cudnn.benchmark = True
     acc_test = 0
     steps = 0        
-    skip_scheduler = False
-    start_est = False
+    skip_scheduler = False    
 
     if load_root and load_root.exists():
         checkpoint = torch.load(load_root / "chkpnt.pt")
