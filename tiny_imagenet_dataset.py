@@ -1,13 +1,11 @@
-from PIL import Image
 import numpy as np
 import os
-
 from collections import defaultdict
+
 from torch.utils.data import Dataset
+from PIL import Image
 
-from tqdm.autonotebook import tqdm
-
-dir_structure_help = r"""
+"""dir_structure_help
 TinyImageNetPath
 ├── test
 │   └── images
@@ -136,17 +134,32 @@ Members:
   label_data: Label data
 """
 class TinyImageNetDataset(Dataset):
-  def __init__(self, root_dir, mode='train', preload=True, load_transform=None,
+    def __init__(self, root_dir, mode='train',
+                transform=None, download=False):
+        tinp = TinyImageNetPaths(root_dir, download)
+        self.mode = mode
+        self.label_idx = 1  # from [image, id, nid, box]    
+        self.transform = transform    
+        self.img_data = []
+        self.label_data = []
+    
+    def __getitem__(self, index):        
+        img = Image.open(self.f_names[index])
+        if img.mode == 'L':
+            img = Image.new("RGB", img.size).paste(img)
+        label = self.labels[index]
+        return img, label
+        
+    def __len__(self):
+        return len(self.f_names)
+
+class TinyImageNetDataset2(Dataset):
+  def __init__(self, root_dir, mode='train', load_transform=None,
                transform=None, download=False, max_samples=None):
     tinp = TinyImageNetPaths(root_dir, download)
     self.mode = mode
-    self.label_idx = 1  # from [image, id, nid, box]
-    self.preload = preload
-    self.transform = transform
-    self.transform_results = dict()
-
-    self.IMAGE_SHAPE = (64, 64, 3)
-
+    self.label_idx = 1  # from [image, id, nid, box]    
+    self.transform = transform    
     self.img_data = []
     self.label_data = []
 
@@ -163,7 +176,7 @@ class TinyImageNetDataset(Dataset):
       self.img_data = np.zeros((self.samples_num,) + self.IMAGE_SHAPE,
                                dtype=np.float32)
       self.label_data = np.zeros((self.samples_num,), dtype=np.int)
-      for idx in tqdm(range(self.samples_num), desc=load_desc):
+      for idx in range(self.samples_num):
         s = self.samples[idx]
         img = Image.open(s[0])
         if img.mode == 'L':
@@ -196,3 +209,7 @@ class TinyImageNetDataset(Dataset):
     if self.transform:
       sample = self.transform(sample)
     return sample
+
+
+  if __name__ == "__main__":
+    D = TinyImageNetDataset(r'../datasets/', mode='train', preload=True, load_transform=None, transform=None, download=False, max_samples=None)
