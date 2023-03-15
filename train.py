@@ -149,7 +149,9 @@ def train():
         raise ValueError("wrong loss, received {}".format(args.loss_type))
     
     loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)    
-    
+    from losses import HSIC
+    criterion_hsic = HSIC(reduction="sum").to(device)
+
     torch.backends.cudnn.benchmark = True
     acc_test = 0
     steps = 0        
@@ -180,8 +182,10 @@ def train():
             y = y.to(device)
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
-                loss = criterion(y_est, y)
-                
+                loss_cls = criterion(y_est, y)
+                loss_hsic = criterion_hsic(y_est, y_est)
+                loss = loss_cls + 10*loss_cls
+
             if args.amp:
                 scaler.scale(criterion).backward()
                 scaler.unscale_(opt)
@@ -204,6 +208,7 @@ def train():
             acc = logger.accuracy(y_est, target=y, topk=(1,))[0]
             
             metric_logger.update(loss=loss.item())
+            metric_logger.update(loss_hsic=loss_hsic.item())
             metric_logger.update(acc=acc)
             metric_logger.update(lr=opt.param_groups[0]["lr"])
             ######################
@@ -211,12 +216,14 @@ def train():
             ######################               
             steps += 1                        
             if steps % args.save_interval != 0:
-                writer.add_scalar(f"loss/train", loss.item(), steps)
-                writer.add_scalar(f"acc/train", acc, steps)
+                writer.add_scalar(f"train/ce", loss.item(), steps)
+                writer.add_scalar(f"train/hsic", loss_hsic.item(), steps)
+                writer.add_scalar(f"train/acc", acc, steps)
                 writer.add_scalar(f"lr", lr_scheduler.get_last_lr()[0], steps)
             else:
                 acc_test = 0
                 loss_test = 0
+                loss_hsic_test = 0
                 net.eval()
                 with torch.no_grad():                                        
                     for i, (x, y) in enumerate(test_loader):                                                
@@ -224,13 +231,16 @@ def train():
                         y = y.to(device)
                         y_est = net(x)
                         loss_test += loss_ce(y_est, y).item()
+                        loss_hsic_test += criterion_hsic(y_est, F.one_hot(y, num_classes=10).float()).item()
                         acc_test += logger.accuracy(y_est, target=y, topk=(1, ))[0]
                                 
                 loss_test /= len(test_loader)
                 acc_test /= len(test_loader)
+                loss_hsic_test /= len(test_loader)
 
-                writer.add_scalar("loss/test", loss_test, steps)
-                writer.add_scalar("acc/test", acc_test, steps)
+                writer.add_scalar(f"test/ce", loss_test, steps)
+                writer.add_scalar(f"test/hsic", loss_hsic_test, steps)
+                writer.add_scalar(f"test/acc", acc_test, steps)
 
                 metric_logger.update(loss_test=loss_test)
                 metric_logger.update(acc_test=acc)
