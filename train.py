@@ -184,7 +184,7 @@ def train():
                 y_est = net(x)
                 loss_cls = criterion(y_est, y)
                 loss_hsic = criterion_hsic(y_est, y_est)
-                loss = loss_cls + 10*loss_cls
+                loss = 0.001*loss_cls + loss_hsic
 
             if args.amp:
                 scaler.scale(criterion).backward()
@@ -216,9 +216,8 @@ def train():
             ######################               
             steps += 1                        
             if steps % args.save_interval != 0:
-                writer.add_scalar(f"train/ce", loss.item(), steps)
-                writer.add_scalar(f"train/hsic", loss_hsic.item(), steps)
-                writer.add_scalar(f"train/acc", acc, steps)
+                writer.add_scalar(f"loss/train", loss.item(), steps)
+                writer.add_scalar(f"acc/train", acc, steps)
                 writer.add_scalar(f"lr", lr_scheduler.get_last_lr()[0], steps)
             else:
                 acc_test = 0
@@ -238,9 +237,8 @@ def train():
                 acc_test /= len(test_loader)
                 loss_hsic_test /= len(test_loader)
 
-                writer.add_scalar(f"test/ce", loss_test, steps)
-                writer.add_scalar(f"test/hsic", loss_hsic_test, steps)
-                writer.add_scalar(f"test/acc", acc_test, steps)
+                writer.add_scalar("loss/test", loss_test, steps)
+                writer.add_scalar("acc/test", acc_test, steps)
 
                 metric_logger.update(loss_test=loss_test)
                 metric_logger.update(acc_test=acc)
