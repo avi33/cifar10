@@ -98,8 +98,12 @@ def train():
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
     '''net'''
-    from modules.models import Net    
+    from modules.models import Net        
     net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))
+    # if int(torch.__version__.split('.')[0]) > 1:
+    #     net = torch.compile(net)
+    #     print("compiled")
+    #     torch._dynamo.config.suppress_errors = True
     # from RepVGG.repvggplus import create_RepVGGplus_by_name
     # net = create_RepVGGplus_by_name("RepVGG-A1", deploy=False, use_checkpoint=False)
     # net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type)
@@ -149,9 +153,7 @@ def train():
         raise ValueError("wrong loss, received {}".format(args.loss_type))
     
     loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)    
-    from losses import HSIC
-    criterion_hsic = HSIC(reduction="sum").to(device)
-
+    
     torch.backends.cudnn.benchmark = True
     acc_test = 0
     steps = 0        
@@ -182,9 +184,7 @@ def train():
             y = y.to(device)
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
-                loss_cls = criterion(y_est, y)
-                loss_hsic = criterion_hsic(y_est, y_est)
-                loss = 0.001*loss_cls + loss_hsic
+                loss = criterion(y_est, y)
 
             if args.amp:
                 scaler.scale(criterion).backward()
@@ -207,8 +207,7 @@ def train():
             '''metrics'''            
             acc = logger.accuracy(y_est, target=y, topk=(1,))[0]
             
-            metric_logger.update(loss=loss.item())
-            metric_logger.update(loss_hsic=loss_hsic.item())
+            metric_logger.update(loss=loss.item())            
             metric_logger.update(acc=acc)
             metric_logger.update(lr=opt.param_groups[0]["lr"])
             ######################
@@ -221,21 +220,18 @@ def train():
                 writer.add_scalar(f"lr", lr_scheduler.get_last_lr()[0], steps)
             else:
                 acc_test = 0
-                loss_test = 0
-                loss_hsic_test = 0
+                loss_test = 0                
                 net.eval()
                 with torch.no_grad():                                        
                     for i, (x, y) in enumerate(test_loader):                                                
                         x = x.to(device)
                         y = y.to(device)
                         y_est = net(x)
-                        loss_test += loss_ce(y_est, y).item()
-                        loss_hsic_test += criterion_hsic(y_est, F.one_hot(y, num_classes=10).float()).item()
+                        loss_test += loss_ce(y_est, y).item()                        
                         acc_test += logger.accuracy(y_est, target=y, topk=(1, ))[0]
                                 
                 loss_test /= len(test_loader)
-                acc_test /= len(test_loader)
-                loss_hsic_test /= len(test_loader)
+                acc_test /= len(test_loader)                
 
                 writer.add_scalar("loss/test", loss_test, steps)
                 writer.add_scalar("acc/test", acc_test, steps)

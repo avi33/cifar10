@@ -37,6 +37,34 @@ class TFAggregation(nn.Module):
         elif tf_type == "my":
             from modules.transformer_encoder_my import TFEncoder
             self.tf = TFEncoder(num_layers=n_layers, num_heads=n_heads, d_model=emb_dim, ff_hidden_dim=ff_dim, p=p, norm=nn.LayerNorm(emb_dim))
+        self.pos_emb = nn.Conv2d(emb_dim, emb_dim, kernel_size=3, stride=1, padding=1, padding_mode='zeros', groups=emb_dim)        
+        self.avg_pool = FastGlobalAvgPool(flatten=True)
+        self._reset_parameters()
+        
+    def _reset_parameters(self):
+        r"""Initiate parameters in the transformer model."""
+        for p in self.parameters():
+            if p.dim() > 1:
+                torch.nn.init.xavier_uniform_(p)
+
+    def forward(self, x):
+        pe = self.pos_emb(x)
+        x = x + pe
+        x = x.view(x.shape[0], self.emb_dim, -1).transpose(2, 1).contiguous()
+        x = x.transpose(2, 1).contiguous()
+        out = self.avg_pool(x)        
+        return out
+
+class TFAggregationSimplified(nn.Module):
+    def __init__(self, seq_len, emb_dim, ff_dim, n_heads, n_layers, p, tf_type) -> None:
+        super().__init__()
+        self.emb_dim = emb_dim        
+        if tf_type == "torch":
+            tf_layer = nn.TransformerEncoderLayer(d_model=emb_dim, nhead=n_heads, dim_feedforward=ff_dim, dropout=p, activation=F.relu, layer_norm_eps=1e-5, batch_first=True)
+            self.tf = nn.TransformerEncoder(tf_layer, num_layers=n_layers, norm=nn.LayerNorm(emb_dim),)
+        elif tf_type == "my":
+            from modules.transformer_encoder_my import TFEncoder
+            self.tf = TFEncoder(num_layers=n_layers, num_heads=n_heads, d_model=emb_dim, ff_hidden_dim=ff_dim, p=p, norm=nn.LayerNorm(emb_dim))
         self.cls_token = self.cls_token = nn.Parameter(torch.zeros(1, 1, emb_dim))
         # self.pos_emb = nn.Conv1d(seq_len+1, seq_len+1, 1, 1, groups=seq_len+1)
         self.pos_emb = nn.Parameter(torch.zeros(1, seq_len + 1, emb_dim))
@@ -56,7 +84,6 @@ class TFAggregation(nn.Module):
         x = self.tf(x)
         out = x[:, 0, :]
         return out
-
 
 class TFAggregation2(nn.Module):
     def __init__(self, seq_len, emb_dim, ff_dim, n_heads, n_layers, p, tf_type) -> None:
@@ -93,7 +120,7 @@ class Net(nn.Module):
         self.cnn = CNN(nf=16, factors=factors)
         seq_len = inp_sz[0]*inp_sz[1] // (np.prod(factors)**2)
         # self.proj_emb = nn.Conv2d(nf*2**len(factors), emb_dim, 1, 1, groups=emb_dim)
-        self.tf = TFAggregation2(seq_len=seq_len, emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1, tf_type=tf_type)                        
+        self.tf = TFAggregation(seq_len=seq_len, emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1, tf_type=tf_type)                        
         self.project = nn.Linear(emb_dim, n_classes)
 
     def forward(self, x):

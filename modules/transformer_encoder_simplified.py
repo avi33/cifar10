@@ -2,7 +2,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
-from modules.space_to_depth_1d import SpaceToDepth1dModule
+from space_to_depth_1d import SpaceToDepth1dModule
+
+S2D = nn.Sequential(
+    SpaceToDepth1dModule(remove_model_jit=True),
+    nn.Conv1d(128, 64, 1, 1)
+)
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads, p, d_input=None):
@@ -44,11 +49,12 @@ class MultiHeadAttention(nn.Module):
         # Scaling by d_k so that the soft(arg)max doesnt saturate
         Q = Q / np.sqrt(self.d_k)                         # (bs, n_heads, q_length, dim_per_head)
         scores = torch.matmul(Q, K.transpose(2,3).contiguous())          # (bs, n_heads, q_length, k_length)
-        
-        A = F.softmax(scores, dim=3)   # (bs, n_heads, q_length, k_length)
+        scores = scores.sum(-1, keepdim=True)
+
+        A = F.softmax(scores, dim=2)   # (bs, n_heads, q_length, k_length)
         
         # Get the weighted average of the values
-        H = torch.matmul(A, V)     # (bs, n_heads, q_length, dim_per_head)
+        H = A * V#torch.matmul(A, V)     # (bs, n_heads, q_length, dim_per_head)
 
         H = self.dropout1(H)
         return H, A 
@@ -71,11 +77,14 @@ class MultiHeadAttention(nn.Module):
     def forward(self, X_q, X_k, X_v):
         batch_size, seq_length, dim = X_q.size()
 
+        X_k = S2D(X_k.transpose(2, 1).contiguous()).transpose(2, 1).contiguous()
         # After transforming, split into num_heads 
         Q = self.split_heads(self.W_q(X_q), batch_size)  # (bs, n_heads, q_length, dim_per_head)
         K = self.split_heads(self.W_k(X_k), batch_size)  # (bs, n_heads, k_length, dim_per_head)
         V = self.split_heads(self.W_v(X_v), batch_size)  # (bs, n_heads, v_length, dim_per_head)
         
+        '''pool on sequence axis'''
+        V = V.sum(-2, keepdims=True)
         # Calculate the attention weights for each of the heads
         H_cat, A = self.scaled_dot_product_attention(Q, K, V)
         
@@ -213,3 +222,9 @@ class TFEncoder(nn.Module):
         if self.norm is not None:
             x = self.norm(x)
         return x  # (batch_size, input_seq_len, d_model)
+    
+
+if __name__ == "__main__":
+    tf = TFEncoder(1, 64, 1, 128, 0.5, torch.nn.LayerNorm)
+    x = torch.randn(2, 10, 64)
+    y = tf(x)

@@ -10,7 +10,7 @@ class SpaceToDepth1d(nn.Module):
     def forward(self, x):
         b, c, n = x.size()
         unfolded_x = torch.nn.functional.unfold(x, self.bs, stride=self.bs)
-        return unfolded_x.view(n, c * self.bs * 2, n // self.bs)
+        return unfolded_x.view(b, c * self.bs, n // self.bs)
     
 
 @torch.jit.script
