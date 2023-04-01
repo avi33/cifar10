@@ -130,11 +130,15 @@ class HSIC(nn.Module):
         return -2*torch.mm(x,x.t()) + instances_norm + instances_norm.t()
     
 if __name__ == '__main__':
-    L = ZLPR(10)
+    # L = ZLPR(10)
+    # pred = torch.randn(1, 10)
+    # target = torch.Tensor([2]).long()
+    # for k in range(10):
+    #     pred_ = pred.clone()
+    #     pred_[:, k] = 10        
+    #     loss = L(pred_, target)
+    #     print(loss)
+    H = HSIC()
+    x = torch.randn()
     pred = torch.randn(1, 10)
     target = torch.Tensor([2]).long()
-    for k in range(10):
-        pred_ = pred.clone()
-        pred_[:, k] = 10        
-        loss = L(pred_, target)
-        print(loss)
