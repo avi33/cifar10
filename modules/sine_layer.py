@@ -14,5 +14,5 @@ class Sine(nn.Module):
 
     def forward(self, x):
         self._norm_minmax(x)
-        x = torch.sin(x)
+        x = x + torch.sin(x)
         return x
