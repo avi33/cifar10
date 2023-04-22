@@ -34,6 +34,7 @@ def parse_args():
     '''debug'''
     parser.add_argument("--save_path", default='outputs/tmp', type=Path)
     parser.add_argument("--load_path", default=None, type=Path)
+    parser.add_argument("--ssl_model", default=None, type=Path)
     parser.add_argument("--save_interval", default=100, type=int)    
     parser.add_argument("--log_interval", default=100, type=int)          
     
@@ -95,8 +96,8 @@ def train():
     writer = SummaryWriter(str(root))
     '''data'''
     train_set, test_set = create_dataset(args)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=8, pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=8, pin_memory=True)
     '''net'''
     from modules.models import Net
     net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))
@@ -154,18 +155,26 @@ def train():
     from losses import HSIC
     H = HSIC(reduction='sum')    
     loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)    
-    
-    torch.backends.cudnn.benchmark = True
-    acc_test = 0
-    steps = 0        
-    skip_scheduler = False    
+            
+    if args.ssl_model:
+        checkpoint = torch.load(args.ssl_model / "chkpnt.pt")
+        net.load_state_dict(checkpoint['model_dict'], strict=False)
+        del checkpoint
+        print('ssl model loaded')
 
     if load_root and load_root.exists():
         checkpoint = torch.load(load_root / "chkpnt.pt")
         net.load_state_dict(checkpoint['model_dict'])
         opt.load_state_dict(checkpoint['opt_dict'])
         steps = checkpoint['resume_step'] if 'resume_step' in checkpoint.keys() else 0
-        print('checkpoints loaded')
+        del checkpoint
+        print('checkpoints loaded')        
+
+    
+    torch.backends.cudnn.benchmark = True
+    acc_test = 0
+    steps = 0        
+    skip_scheduler = False    
 
     for epoch in range(1, args.n_epochs + 1):
         metric_logger = logger.MetricLogger(delimiter="  ")

@@ -69,13 +69,13 @@ class Net(nn.Module):
         self.nf = nf
         self.cnn = CNN(nf=16, factors=factors)
         self.tf = TFAggregation(emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1, tf_type=tf_type)                        
-        # self.project = nn.Linear(emb_dim, n_classes)
+        self.project = nn.Linear(emb_dim, n_classes)
 
     def forward(self, x):
         x = self.cnn(x)
         x = self.tf(x)
-        # y = self.project(x)
-        return x
+        y = self.project(x)
+        return y
 
 if __name__ == "__main__":    
     from helper_funcs import count_parameters, measure_inference_time, check_receptivefield
