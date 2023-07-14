@@ -13,12 +13,13 @@ import torchvision.transforms as T
 from helper_funcs import add_weight_decay
 import logger
 import copy
+from fda import fda
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", default=64, type=int)
+    parser.add_argument("--batch_size", default=16, type=int)
     parser.add_argument("--n_epochs", default=100, type=int)
     parser.add_argument("--dataset", default="cifar10", type=str)
     '''net'''
@@ -36,51 +37,11 @@ def parse_args():
     parser.add_argument("--load_path", default=None, type=Path)
     parser.add_argument("--ssl_model", default=None, type=Path)
     parser.add_argument("--save_interval", default=100, type=int)    
-    parser.add_argument("--log_interval", default=100, type=int)          
+    parser.add_argument("--log_interval", default=100, type=int)
+    parser.add_argument("--use_fda", default=False, action="store_true")
     
     args = parser.parse_args()
     return args
-
-def create_dataset(args):
-    if args.dataset == 'cifar10':
-        from torchvision.datasets import CIFAR10 as Dataset
-        train_augs = T.Compose([#T.ColorJitter(hue=.05, saturation=.05),
-                                T.RandomHorizontalFlip(p=0.5),
-                                T.RandomRotation(degrees=15),
-                                T.RandomResizedCrop(size=(32, 32), scale=(0.5, 1.0)),                            
-                                T.ToTensor(), 
-                                T.Normalize([0.5]*3, [0.5]*3)])
-        
-        test_augs = T.Compose([T.ToTensor(), 
-                            T.Normalize([0.5]*3, [0.5]*3)])
-
-        train_set = Dataset(train=True, transform=train_augs, download=False, root='data')    
-        test_set = Dataset(train=False, transform=test_augs, download=False, root='data')
-
-    elif args.dataset == 'svhn':
-        from torchvision.datasets import SVHN as Dataset
-        train_augs = T.Compose([#T.ColorJitter(hue=.05, saturation=.05),
-                                T.RandomHorizontalFlip(p=0.5),
-                                T.RandomRotation(degrees=15),
-                                T.RandomResizedCrop(size=(32, 32), scale=(0.5, 1.0)),                            
-                                T.ToTensor(), 
-                                T.Normalize([0.5]*3, [0.5]*3)])
-        
-        test_augs = T.Compose([T.ToTensor(), 
-                            T.Normalize([0.5]*3, [0.5]*3)])
-
-        train_set = Dataset(train=True, transform=train_augs, download=False, root='data')    
-        test_set = Dataset(train=False, transform=test_augs, download=False, root='data')
-
-    elif args.dataset == 'tinyimagenet':
-        from data import TinyImageNetDataset as Dataset
-        train_set = Dataset(train=True, transform=train_augs, download=False, root='data')    
-        test_set = Dataset(train=False, transform=test_augs, download=False, root='data')
-    
-    else:
-        raise ValueError("wrong dataset {}".format(args.dataset))
-    
-    return train_set, test_set
 
 def train():
     args = parse_args()
@@ -94,23 +55,16 @@ def train():
     with open(root / "args.yml", "w") as f:
         yaml.dump(args, f)
     writer = SummaryWriter(str(root))
+    
     '''data'''
+    from datasets.data_utils import create_dataset
     train_set, test_set = create_dataset(args)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=8, pin_memory=True)
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=8, pin_memory=True)
+    
     '''net'''
     from modules.models import Net
-    net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))
-    # if int(torch.__version__.split('.')[0]) > 1:
-    #     net = torch.compile(net)
-    #     print("compiled")
-    #     torch._dynamo.config.suppress_errors = True
-    # from RepVGG.repvggplus import create_RepVGGplus_by_name
-    # net = create_RepVGGplus_by_name("RepVGG-A1", deploy=False, use_checkpoint=False)
-    # net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type)
-    # from modules.fftlayer import Net
-    # net = Net(nf=16)
-    # net.Linear = nn.Linear(1280, args.n_classes)
+    net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))        
     net.to(device)
     
     '''optimizer'''
@@ -153,7 +107,7 @@ def train():
     else:
         raise ValueError("wrong loss, received {}".format(args.loss_type))
     from losses import HSIC
-    H = HSIC(reduction='sum')    
+    H = HSIC(reduction='sum')
     loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)    
             
     if args.ssl_model:
@@ -192,6 +146,8 @@ def train():
             net.zero_grad(set_to_none=True)
             x = x.to(device)            
             y = y.to(device)
+            if args.use_fda:
+                x = fda(x)
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
                 loss_cls = criterion(y_est, y)
