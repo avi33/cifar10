@@ -13,7 +13,6 @@ import torchvision.transforms as T
 from helper_funcs import add_weight_decay
 import logger
 import copy
-from fda import fda
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -29,9 +28,7 @@ def parse_args():
     parser.add_argument("--max_lr", default=3e-4, type=float)
     parser.add_argument("--wd", default=1e-4, type=float)
     parser.add_argument('--ema', default=0.995, type=float)
-    parser.add_argument("--amp", action='store_true', default=False)
-    '''loss'''
-    parser.add_argument("--loss_type", default="label_smooth", type=str)
+    parser.add_argument("--amp", action='store_true', default=False)        
     '''debug'''
     parser.add_argument("--save_path", default='outputs/tmp', type=Path)
     parser.add_argument("--load_path", default=None, type=Path)
@@ -62,6 +59,9 @@ def train():
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=8, pin_memory=True)
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=8, pin_memory=True)
     
+    if args.use_fda:
+        import datasets.fda as fda
+
     '''net'''
     from modules.models import Net
     net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))        
@@ -92,23 +92,10 @@ def train():
         decay_per_epoch_orig = args.ema
 
     '''loss'''
-    if args.loss_type == "ce":
-        criterion = nn.CrossEntropyLoss(reduction="sum").to(device)
-    elif args.loss_type == 'label_smooth':
-        from losses import LabelSmoothCrossEntropyLoss
-        criterion = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
-    elif args.loss_type == 'label_smooth_dirichlet':
-        from modules.dirichlet import EstDirichlet        
-        D = EstDirichlet(n_classes=10, n_iters=100, tol=1e-3)
-        from losses import LabelSmoothDirichletCrossEntropyLoss
-        # criterion = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
-        criterion = LabelSmoothDirichletCrossEntropyLoss(reduction="sum").to(device)      
-        # criterion = nn.NLLLoss(reduction="sum").to(device)
-    else:
-        raise ValueError("wrong loss, received {}".format(args.loss_type))
-    from losses import HSIC
-    H = HSIC(reduction='sum')
-    loss_ce = nn.CrossEntropyLoss(reduction="sum").to(device)    
+    from losses import LabelSmoothCrossEntropyLoss, HSIC
+    l_lsce = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
+    l_ce = criterion = nn.CrossEntropyLoss(reduction="sum").to(device)
+    l_hsic = HSIC(reduction='sum')
             
     if args.ssl_model:
         checkpoint = torch.load(args.ssl_model / "chkpnt.pt")
@@ -134,6 +121,7 @@ def train():
         metric_logger = logger.MetricLogger(delimiter="  ")
         metric_logger.add_meter("lr", logger.SmoothedValue(window_size=1, fmt="{value:.6f}"))
         header = f"Epoch: [{epoch}]"
+        
         if args.ema is not None:
             if epochs_from_last_reset <= 1:  # two first epochs do ultra short-term ema
                 ema.decay_per_epoch = 0.01
@@ -142,16 +130,18 @@ def train():
             epochs_from_last_reset += 1
             # set 'decay_per_step' for the eooch
             ema.set_decay_per_step(len(train_loader))        
+        
         for iterno, (x, y) in  enumerate(metric_logger.log_every(train_loader, args.log_interval, header)):        
             net.zero_grad(set_to_none=True)
             x = x.to(device)            
             y = y.to(device)
             if args.use_fda:
                 x = fda(x)
+            
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
-                loss_cls = criterion(y_est, y)
-                loss_hsic = H(F.one_hot(y, num_classes=args.n_classes)-y_est, x.view(args.batch_size, -1))
+                loss_cls = l_lsce(y_est, y)
+                loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est, x.view(args.batch_size, -1))
                 loss = loss_cls + loss_hsic
 
             if args.amp:
@@ -197,7 +187,7 @@ def train():
                         x = x.to(device)
                         y = y.to(device)
                         y_est = net(x)
-                        loss_test += loss_ce(y_est, y).item()                        
+                        loss_test += l_ce(y_est, y).item()                        
                         acc_test += logger.accuracy(y_est, target=y, topk=(1, ))[0]
                                 
                 loss_test /= len(test_loader)
@@ -211,7 +201,6 @@ def train():
 
                 net.train()                
                                 
-                best_acc = metric_logger.meters['acc_test'].deque[0]
                 chkpnt = {
                     'model_dict': net.state_dict(),
                     'opt_dict': opt.state_dict(),
