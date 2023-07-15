@@ -143,7 +143,7 @@ def train():
                 loss_cls = l_lsce(y_est, y)
                 loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est, x.view(args.batch_size, -1))
                 loss = loss_cls + loss_hsic
-
+                
             if args.amp:
                 scaler.scale(criterion).backward()
                 scaler.unscale_(opt)
