@@ -2,17 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms.transforms import ToPILImage
 import yaml
-import numpy as np
 import argparse
 from pathlib import Path
-import torchvision.transforms as T
-from helper_funcs import add_weight_decay
-import logger
-import copy
+from utils.helper_funcs import add_weight_decay
+import utils.logger as logger
+from metrics import accuracy
+# from clearml import Task
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -45,15 +42,18 @@ def train():
 
     root = Path(args.save_path)
     load_root = Path(args.load_path) if args.load_path else None    
-    root.mkdir(parents=True, exist_ok=True)       
+    root.mkdir(parents=True, exist_ok=True)
+    # task = Task.init(project_name='classification', task_name='transformer')
     ####################################
     # Dump arguments and create logger #
     ####################################
     with open(root / "args.yml", "w") as f:
         yaml.dump(args, f)
     writer = SummaryWriter(str(root))
-    
-    '''data'''
+        
+    ####################################
+    # Data #
+    ####################################
     from datasets.data_utils import create_dataset
     train_set, test_set = create_dataset(args)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=8, pin_memory=True)
@@ -62,7 +62,9 @@ def train():
     if args.use_fda:
         import datasets.fda as fda
 
-    '''net'''
+    ####################################
+    # Network #
+    ####################################
     from modules.models import Net
     net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))        
     net.to(device)
@@ -163,7 +165,7 @@ def train():
                 lr_scheduler.step()
 
             '''metrics'''            
-            acc = logger.accuracy(y_est, target=y, topk=(1,))[0]
+            acc = accuracy(y_est, target=y, topk=(1,))[0]
             
             metric_logger.update(loss=loss.item())
             metric_logger.update(hsic=loss_hsic.item())
@@ -174,9 +176,9 @@ def train():
             ######################               
             steps += 1                        
             if steps % args.save_interval != 0:
-                writer.add_scalar(f"loss/train", loss.item(), steps)
-                writer.add_scalar(f"hsic/train", loss_hsic.item(), steps)
-                writer.add_scalar(f"acc/train", acc, steps)
+                writer.add_scalar(f"train/ce", loss.item(), steps)
+                writer.add_scalar(f"train/hsic", loss_hsic.item(), steps)
+                writer.add_scalar(f"train/acc", acc, steps)
                 writer.add_scalar(f"lr", lr_scheduler.get_last_lr()[0], steps)
             else:
                 acc_test = 0
@@ -188,7 +190,7 @@ def train():
                         y = y.to(device)
                         y_est = net(x)
                         loss_test += l_ce(y_est, y).item()                        
-                        acc_test += logger.accuracy(y_est, target=y, topk=(1, ))[0]
+                        acc_test += accuracy(y_est, target=y, topk=(1, ))[0]
                                 
                 loss_test /= len(test_loader)
                 acc_test /= len(test_loader)                

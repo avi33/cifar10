@@ -7,10 +7,8 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as T
 import argparse
 from pathlib import Path
-from logger import accuracy
 import yaml
-import random
-from helper_funcs import save_torchscript_model, load_torchscript_model
+from metrics import accuracy
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
