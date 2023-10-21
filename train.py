@@ -18,6 +18,7 @@ def parse_args():
     parser.add_argument("--batch_size", default=16, type=int)
     parser.add_argument("--n_epochs", default=100, type=int)
     parser.add_argument("--dataset", default="cifar10", type=str)
+    parser.add_argument("--num_workers", default=0, type=int)
     '''net'''
     parser.add_argument("--tf_type", default="my", type=str)
     parser.add_argument("--n_classes", default=10, type=int)
@@ -56,8 +57,18 @@ def train():
     ####################################
     from datasets.data_utils import create_dataset
     train_set, test_set = create_dataset(args)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=8, pin_memory=True)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=8, pin_memory=True)
+    train_loader = torch.utils.data.DataLoader(train_set, 
+                                               batch_size=args.batch_size, 
+                                               shuffle=True, drop_last=True, 
+                                               num_workers=args.num_workers, 
+                                               pin_memory=True)
+    
+    test_loader = torch.utils.data.DataLoader(test_set, 
+                                              batch_size=args.batch_size, 
+                                              shuffle=False, 
+                                              drop_last=False, 
+                                              num_workers=args.num_workers, 
+                                              pin_memory=True)
     
     if args.use_fda:
         import datasets.fda as fda
