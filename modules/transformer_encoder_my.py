@@ -182,15 +182,20 @@ class TFEncoderLayer(nn.Module):
         return out2
 
 class TFEncoder(nn.Module):
-    def __init__(self, num_layers, d_model, num_heads, ff_hidden_dim, p=0.1, norm=None):
+    def __init__(self, num_layers, d_model, num_heads, ff_hidden_dim, p=0.1, norm=None, use_inner_pos_embedding=False):
         super().__init__()
 
         self.d_model = d_model
         self.num_layers = num_layers        
 
         self.enc_layers = nn.ModuleList()
+        self.use_inner_pos_embedding = use_inner_pos_embedding
+        if use_inner_pos_embedding:
+            self.pos_emb = nn.ModuleList()
         for _ in range(num_layers):
             self.enc_layers.append(TFEncoderLayer(d_model, num_heads, ff_hidden_dim, p))        
+            if use_inner_pos_embedding:
+                self.pos_emb.append(nn.Conv1d(d_model, d_model, kernel_size=7, stride=1, padding=3, padding_mode='zeros', groups=d_model, bias=True))
         
         self.norm = nn.LayerNorm(normalized_shape=d_model, eps=1e-5) if norm is not None else norm
         
@@ -213,6 +218,8 @@ class TFEncoder(nn.Module):
 
         for i in range(self.num_layers):
             x = self.enc_layers[i](x)
+            if self.use_inner_pos_embedding:
+                x = self.pos_emb[i](x.transpose(2, 1).contiguous()).transpose(2, 1).contiguous()
         if self.norm is not None:
             x = self.norm(x)
         return x  # (batch_size, input_seq_len, d_model)

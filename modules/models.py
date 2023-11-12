@@ -31,18 +31,14 @@ class TFAggregation(nn.Module):
     def __init__(self, emb_dim, ff_dim, n_heads, n_layers, p, tf_type) -> None:
         super().__init__()
         self.emb_dim = emb_dim        
-        
-        if tf_type == "torch":
-            tf_layer = nn.TransformerEncoderLayer(d_model=emb_dim, nhead=n_heads, dim_feedforward=ff_dim, dropout=p, activation=F.relu, layer_norm_eps=1e-5, batch_first=True)
-            self.tf = nn.TransformerEncoder(tf_layer, num_layers=n_layers, norm=nn.LayerNorm(emb_dim),)
-        
-        elif tf_type == "my":
-            from modules.transformer_encoder_my import TFEncoder
-            self.tf = TFEncoder(num_layers=n_layers, num_heads=n_heads, d_model=emb_dim, ff_hidden_dim=ff_dim, p=p, norm=nn.LayerNorm(emb_dim))
-        
-        else:
-            raise NotImplemented("wrong tf type, reveived {}".format(tf_type))
-        
+                
+        from modules.transformer_encoder_my import TFEncoder
+        self.tf = TFEncoder(num_layers=n_layers, 
+                            num_heads=n_heads, 
+                            d_model=emb_dim, 
+                            ff_hidden_dim=ff_dim, 
+                            p=p, norm=nn.LayerNorm(emb_dim),
+                            use_inner_pos_embedding=False)
         self.pos_emb = nn.Conv2d(emb_dim, emb_dim, kernel_size=7, stride=1, padding=3, padding_mode='zeros', groups=emb_dim, bias=True)        
         
         self.avg_pool = FastGlobalAvgPool(flatten=True)
@@ -56,7 +52,7 @@ class TFAggregation(nn.Module):
                 torch.nn.init.xavier_uniform_(p)
 
     def forward(self, x):                
-        x = x + self.pos_emb(x)
+        x = self.pos_emb(x)
         x = x.view(x.shape[0], self.emb_dim, -1).transpose(2, 1).contiguous()        
         x = self.tf(x)
         x = x.transpose(2, 1).contiguous()

@@ -61,17 +61,18 @@ def train():
                                                batch_size=args.batch_size, 
                                                shuffle=True, drop_last=True, 
                                                num_workers=args.num_workers, 
-                                               pin_memory=True)
+                                               pin_memory=False)
     
     test_loader = torch.utils.data.DataLoader(test_set, 
                                               batch_size=args.batch_size, 
                                               shuffle=False, 
                                               drop_last=False, 
                                               num_workers=args.num_workers, 
-                                              pin_memory=True)
+                                              pin_memory=False)
     
     if args.use_fda:
-        import datasets.fda as fda
+        from datasets.fda import FDA
+        fda = FDA(p=0.5, lambda_max=0.1)        
 
     ####################################
     # Network #
@@ -148,6 +149,7 @@ def train():
             net.zero_grad(set_to_none=True)
             x = x.to(device)            
             y = y.to(device)
+            
             if args.use_fda:
                 x = fda(x)
             
