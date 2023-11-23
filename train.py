@@ -189,10 +189,19 @@ def train():
             ######################               
             steps += 1                        
             if steps % args.save_interval != 0:
-                writer.add_scalar(f"train/ce", loss.item(), steps)
-                writer.add_scalar(f"train/hsic", loss_hsic.item(), steps)
-                writer.add_scalar(f"train/acc", acc, steps)
+                tb_dict = {}
+                tb_dict['ce'] = {'train':loss.item()}
+                tb_dict['hsic'] = {'train':loss_hsic.item()}
+                tb_dict['acc'] = {'train':acc.item()}
+                
+                # writer.add_scalar(f"ce/train", loss.item(), steps)
+                # writer.add_scalar(f"hsic/train", loss_hsic.item(), steps)
+                # writer.add_scalar(f"acc/train", acc, steps)
                 writer.add_scalar(f"lr", lr_scheduler.get_last_lr()[0], steps)
+                writer.add_scalars("ce", tb_dict['ce'], steps)
+                writer.add_scalars("hsic", tb_dict['hsic'], steps)
+                writer.add_scalars("acc", tb_dict['acc'], steps)
+
             else:
                 acc_test = 0
                 loss_test = 0                
@@ -208,11 +217,15 @@ def train():
                 loss_test /= len(test_loader)
                 acc_test /= len(test_loader)                
 
-                writer.add_scalar("loss/test", loss_test, steps)
-                writer.add_scalar("acc/test", acc_test, steps)
+                tb_dict['ce'].update({'test':loss_test})
+                tb_dict['acc'].update({'test':acc_test})
+                writer.add_scalars("ce", tb_dict['ce'], steps)
+                writer.add_scalars("acc", tb_dict['acc'], steps)
+                # writer.add_scalar("ce/test", loss_test, steps)
+                # writer.add_scalar("acc/test", acc_test, steps)
 
                 metric_logger.update(loss_test=loss_test)
-                metric_logger.update(acc_test=acc)
+                metric_logger.update(acc_test=acc_test)
 
                 net.train()                
                                 
