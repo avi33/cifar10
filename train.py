@@ -35,6 +35,7 @@ def parse_args():
     parser.add_argument("--save_interval", default=100, type=int)    
     parser.add_argument("--log_interval", default=100, type=int)
     parser.add_argument("--use_fda", default=False, action="store_true")
+    parser.add_argument("--use_dirichlet", default=False, action="store_true")
     
     args = parser.parse_args()
     return args
@@ -109,11 +110,15 @@ def train():
         decay_per_epoch_orig = args.ema
 
     '''loss'''
-    from losses import LabelSmoothCrossEntropyLoss, HSIC
+    from losses import LabelSmoothCrossEntropyLoss, HSIC    
     l_lsce = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
     l_ce = criterion = nn.CrossEntropyLoss(reduction="sum").to(device)
     l_hsic = HSIC(reduction='sum')
-            
+
+    if args.use_dirichlet:
+        from modules.dirichlet import EstDirichlet
+        est_dirichlet = EstDirichlet(n_classes=args.n_classes)
+        
     if args.ssl_model:
         checkpoint = torch.load(args.ssl_model / "chkpnt.pt")
         net.load_state_dict(checkpoint['model_dict'], strict=False)
@@ -159,7 +164,7 @@ def train():
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
                 loss_cls = l_lsce(y_est, y)
-                loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est, x.view(args.batch_size, -1))
+                loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est.softmax(-1), x.view(args.batch_size, -1))
                 loss = loss_cls + loss_hsic
                 
             if args.amp:
