@@ -163,19 +163,9 @@ def train():
                 x = fda(x)
             
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
-                y_est, gate = net(x)
-
-                pred = y_est.squeeze(1) * gate.softmax(-1)
+                _, gate = net(x)
                 
-                loss_per_expert = torch.stack([l_bce(y_est[:, :, ii].view(-1), (y==ii)*1.) for ii in range(args.n_classes)]).T                
-
-                loss_moe = (loss_per_expert * gate.softmax(-1)).sum(-1).sum()
-
-                loss_per_expert = loss_per_expert.sum(0).mean()
-                
-                loss_gate = l_lsce(gate, y)
-                
-                loss = loss_moe + loss_gate + loss_per_expert
+                loss = l_lsce(gate, y)                
 
             if args.amp:
                 scaler.scale(loss).backward()
@@ -196,14 +186,10 @@ def train():
                 lr_scheduler.step()
 
             '''metrics'''            
-            acc = accuracy(pred, target=y, topk=(1,))[0]
-            acc_gate = accuracy(gate, target=y, topk=(1, ))[0]
+            acc = accuracy(gate, target=y, topk=(1, ))[0]
             
             metric_logger.update(loss=loss.item())
-            metric_logger.update(loss_moe=loss_moe.item())
-            metric_logger.update(loss_per_expert=loss_per_expert.item())
-            metric_logger.update(acc=acc)
-            metric_logger.update(acc_gate=acc_gate)
+            metric_logger.update(acc=acc)            
             metric_logger.update(lr=opt.param_groups[0]["lr"])
             ######################
             # Update tensorboard #
@@ -211,64 +197,32 @@ def train():
             steps += 1                        
             if steps % args.save_interval != 0:                                
                 writer.add_scalar("lr",lr_scheduler.get_last_lr()[0], steps)
-                writer.add_scalar("ce/train", loss.item(), steps)
-                writer.add_scalar("ce_moe/train", loss_moe.item(), steps)
-                writer.add_scalar("ce_expert/train", loss_per_expert.item(), steps)
-                writer.add_scalar("acc/train", acc, steps)
-                writer.add_scalar("acc_gate/train", acc_gate, steps)
+                writer.add_scalar("ce/train", loss.item(), steps)                
+                writer.add_scalar("acc/train", acc, steps)                
 
             else:
                 acc_test = 0
                 loss_test = 0
-                loss_gate_test = 0
-                loss_per_expert_test = 0
-                loss_moe_test = 0
-                acc_gate_test = 0
 
                 net.eval()
                 with torch.no_grad():                                        
                     for i, (x, y) in enumerate(test_loader):                                                
                         x = x.to(device)
                         y = y.to(device)
-                        y_est, gate = net(x)                        
-
-                        pred = y_est.squeeze(1) * gate.softmax(-1)
+                        _, gate = net(x)                        
                         
-                        loss_per_expert = torch.stack([l_bce(y_est[:, :, ii].view(-1), (y==ii)*1.) for ii in range(args.n_classes)]).T                
-
-                        loss_moe_test += (loss_per_expert * gate.softmax(-1)).sum(-1).sum().item()
-
-                        loss_per_expert_test += loss_per_expert.sum(0).mean().item()
+                        loss_test += l_lsce(gate, y).item()
                         
-                        loss_gate_test += l_lsce(gate, y).item()
-
-                        loss_test += loss_moe_test + 10*loss_gate_test + 10*loss_per_expert_test
-
-                        acc_test += accuracy(pred, target=y, topk=(1, ))[0]
-                        acc_gate_test += accuracy(gate, target=y, topk=(1, ))[0]
+                        acc_test += accuracy(gate, target=y, topk=(1, ))[0]
                                 
                 loss_test /= len(test_loader)
-                loss_moe_test /= len(test_loader)
-                loss_gate_test /= len(test_loader)
-                loss_per_expert_test /= len(test_loader)
-
                 acc_test /= len(test_loader)
-                acc_gate_test /= len(test_loader)
-
-                writer.add_scalar("ce/test", loss_test, steps)
-                writer.add_scalar("ce_gate/test", loss_gate_test, steps)
-                writer.add_scalar("ce_moe/test", loss_moe_test, steps)
-                writer.add_scalar("ce_expert/test", loss_per_expert_test, steps)
-                writer.add_scalar("acc/test", acc_test, steps)
-                writer.add_scalar("acc_gate/test", acc_gate_test, steps)
                 
-                metric_logger.update(loss_test=loss_test)                
-                metric_logger.update(loss_gate_test=loss_gate_test)
-                metric_logger.update(loss_expert_test=loss_per_expert_test)
-                metric_logger.update(loss_moe_test=loss_moe_test)
-
-                metric_logger.update(acc_test=acc_test)
-                metric_logger.update(acc_gate_test=acc_gate_test)                
+                writer.add_scalar("ce/test", loss_test, steps)
+                writer.add_scalar("acc/test", acc_test, steps)                
+                
+                metric_logger.update(loss_test=loss_test)
+                metric_logger.update(acc_test=acc_test)                
 
                 net.train()                
                                 

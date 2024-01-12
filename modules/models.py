@@ -48,7 +48,7 @@ class CNN2(nn.Module):
         return x
     
 class TFAggregation(nn.Module):
-    def __init__(self, emb_dim, ff_dim, n_heads, n_layers, p, tf_type) -> None:
+    def __init__(self, emb_dim, ff_dim, n_heads, n_layers, p) -> None:
         super().__init__()
         self.emb_dim = emb_dim                
         # from modules.transformer_encoder_my import TFEncoder
@@ -79,11 +79,11 @@ class TFAggregation(nn.Module):
         return out
 
 class Net(nn.Module):
-    def __init__(self, emb_dim, n_classes, nf, factors, tf_type, inp_sz) -> None:
+    def __init__(self, emb_dim, n_classes, nf, factors) -> None:
         super().__init__()
         self.nf = nf
         self.cnn = CNN(nf=16, factors=factors)
-        self.tf = TFAggregation(emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1, tf_type=tf_type)                        
+        self.tf = TFAggregation(emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1)
         self.project = nn.Linear(emb_dim, n_classes)
 
     def forward(self, x):

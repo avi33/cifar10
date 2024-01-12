@@ -35,8 +35,11 @@ def inference_cifar():
                             num_workers=4, 
                             pin_memory=True)
     
-    from modules.models import Net    
-    net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))
+    # from modules.models import Net    
+    # net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, factors=[2, 2, 2])
+    from modules.mixture_of_experts import MixtureOfExperts
+    net = MixtureOfExperts(emb_dim=128, n_classes=args.n_classes, nf=16, factors=[2, 2, 2])
+    net.to(device)
     # from modules.fftlayer import Net
     # net = Net(nf=16)
     net.eval()
@@ -50,7 +53,8 @@ def inference_cifar():
         x = x.to(device)
         y = y.to(device)
         with torch.no_grad():
-            y_est = net(x)
+            y_est, gate = net(x)
+        y_est = y_est.squeeze(1) * gate.softmax(-1)
         acc += accuracy(y_est, target=y, topk=(1,))[0]
     acc = acc/len(test_loader)
     print(acc)
