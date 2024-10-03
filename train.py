@@ -80,11 +80,18 @@ def train():
     # Network #
     ####################################
     from modules.models import Net
-    net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, tf_type=args.tf_type, factors=[2, 2, 2], inp_sz=(32, 32))        
+    net = Net(emb_dim=128, n_classes=args.n_classes, nf=64, tf_type=args.tf_type, factors=[2], inp_sz=(32, 32))        
     net.to(device)
     print("#params={} Mparams".format(count_parameters(net)/1e6))
-    t_infer = measure_inference_time(net, torch.randn(1, 3, 64, 64))
+    t_infer = measure_inference_time(net, torch.randn(1, 3, 32, 32))
     print("time={}+-{} ms".format(t_infer[0], t_infer[1]))
+    
+    '''loss'''
+    from losses import LabelSmoothCrossEntropyLoss, HSIC, VariationalTiltedLoss
+    l_lsce = VariationalTiltedLoss(LabelSmoothCrossEntropyLoss(reduction="none", smoothing=0.1), t=0.5).to(device) #LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
+    l_ce = nn.CrossEntropyLoss(reduction="sum").to(device)
+    l_hsic = HSIC(reduction='sum')
+
     '''optimizer'''
     if args.amp:
         from torch.cuda.amp import GradScaler
@@ -94,8 +101,8 @@ def train():
         scaler = None
         eps = 1e-8
     
-    parameters = add_weight_decay(net, weight_decay=args.wd, skip_list=())
-
+    parameters = add_weight_decay(net, weight_decay=args.wd, skip_list=(), additional=l_lsce.parameters())
+    from itertools import chain
     opt = optim.AdamW(parameters, lr=args.max_lr, betas=(0.9, 0.99), eps=eps, weight_decay=0)
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(opt,
                                                        max_lr=args.max_lr,
@@ -109,11 +116,6 @@ def train():
         epochs_from_last_reset = 0
         decay_per_epoch_orig = args.ema
 
-    '''loss'''
-    from losses import LabelSmoothCrossEntropyLoss, HSIC    
-    l_lsce = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
-    l_ce = criterion = nn.CrossEntropyLoss(reduction="sum").to(device)
-    l_hsic = HSIC(reduction='sum')
 
     if args.use_dirichlet:
         from modules.dirichlet import EstDirichlet
@@ -137,7 +139,7 @@ def train():
     torch.backends.cudnn.benchmark = True
     acc_test = 0
     steps = 0        
-    skip_scheduler = False    
+    skip_scheduler = False
 
     for epoch in range(1, args.n_epochs + 1):
         metric_logger = logger.MetricLogger(delimiter="  ")
@@ -163,12 +165,14 @@ def train():
             
             with torch.cuda.amp.autocast(enabled=scaler is not None):                
                 y_est = net(x)
+                if not l_lsce.is_initialized:
+                    l_lsce.initialize(y_est, y)
                 loss_cls = l_lsce(y_est, y)
                 loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est.softmax(-1), x.view(args.batch_size, -1))
                 loss = loss_cls + loss_hsic
                 
             if args.amp:
-                scaler.scale(criterion).backward()
+                scaler.scale(l_lsce).backward()
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1)
                 scaler.step(opt)

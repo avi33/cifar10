@@ -129,16 +129,29 @@ class HSIC(nn.Module):
         instances_norm = torch.sum(x**2,-1).reshape((-1,1))
         return -2*torch.mm(x,x.t()) + instances_norm + instances_norm.t()
     
+
+class VariationalTiltedLoss(torch.nn.Module):
+    def __init__(self, underlying_loss, t):
+        super().__init__()
+        self.underlying_loss = underlying_loss
+        self.t = t
+        self.v = torch.nn.Parameter(torch.tensor(0.))
+        self.is_initialized = False
+
+    def initialize(self, preds, targets):
+        with torch.no_grad():
+            init_losses = self.underlying_loss(preds, targets)
+        n = init_losses.shape[0]
+
+        v_init = -torch.logsumexp(self.t * init_losses - math.log(n), dim=-1)
+        self.v.set_(v_init)
+        self.is_initialized = True
+
+    def forward(self, pred, target):
+        sample_loss = self.underlying_loss(pred, target)
+        exp_tilted_losses = torch.exp(self.t * sample_loss + self.v) - self.v
+        return exp_tilted_losses.mean()
+
+
 if __name__ == '__main__':
-    # L = ZLPR(10)
-    # pred = torch.randn(1, 10)
-    # target = torch.Tensor([2]).long()
-    # for k in range(10):
-    #     pred_ = pred.clone()
-    #     pred_[:, k] = 10        
-    #     loss = L(pred_, target)
-    #     print(loss)
-    H = HSIC()
-    x = torch.randn()
-    pred = torch.randn(1, 10)
-    target = torch.Tensor([2]).long()
+    pass

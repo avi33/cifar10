@@ -38,7 +38,7 @@ def measure_inference_time(model, input, repetitions=300, use_16b=False):
     std_syn = np.std(timings)
     return mean_syn, std_syn
 
-def add_weight_decay(model, weight_decay=1e-5, skip_list=()):
+def add_weight_decay(model, weight_decay=1e-5, skip_list=(), additional=None):
     decay = []
     no_decay = []
     for name, param in model.named_parameters():
@@ -49,10 +49,13 @@ def add_weight_decay(model, weight_decay=1e-5, skip_list=()):
             no_decay.append(param)
         else:
             decay.append(param)
-    return [
-        {'params': no_decay, 'weight_decay': 0.},
-        {'params': decay, 'weight_decay': weight_decay}]
-
+    if additional is None:
+        parameters = [{'params': no_decay, 'weight_decay': 0.},
+                    {'params': decay, 'weight_decay': weight_decay}]
+    else:
+        parameters = [{'params': no_decay.append(additional), 'weight_decay': 0.},
+                    {'params': decay, 'weight_decay': weight_decay}]
+    return parameters
 
 def save_model(model, model_dir, model_filename):
     if not os.path.exists(model_dir):

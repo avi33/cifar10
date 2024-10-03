@@ -1,4 +1,3 @@
-from turtle import forward
 import torch
 import torch.nn as nn
 import numpy as np
@@ -7,12 +6,15 @@ import torch.nn.init as init
 from modules.anti_aliasing_downsample import Down
 from modules.res_block import ResBlock
 from modules.average_pooling import FastGlobalAvgPool
+from modules.space_to_depth_2d import SpaceToDepth
 
 class CNN(nn.Module):
     def __init__(self, nf, factors=[2, 2, 2]) -> None:
         super().__init__()
         block = [
-            nn.Conv2d(3, nf, 5, 1, padding=2, padding_mode="reflect", bias=False),
+            SpaceToDepth(),
+            # nn.Conv2d(3, nf, 5, 1, padding=2, padding_mode="reflect", bias=False),
+            nn.Conv2d(3 * 16, nf, 3, 1, 1, bias=False),                        
             nn.BatchNorm2d(nf),
             nn.LeakyReLU(0.2, True)            
         ]
@@ -82,7 +84,7 @@ class Net(nn.Module):
     def __init__(self, emb_dim, n_classes, nf, factors, tf_type, inp_sz) -> None:
         super().__init__()
         self.nf = nf
-        self.cnn = CNN(nf=16, factors=factors)
+        self.cnn = CNN(nf=nf, factors=factors)
         self.tf = TFAggregation(emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1, tf_type=tf_type)                        
         self.project = nn.Linear(emb_dim, n_classes)
 
