@@ -20,8 +20,7 @@ def parse_args():
     parser.add_argument("--n_epochs", default=100, type=int)
     parser.add_argument("--dataset", default="cifar10", type=str)
     parser.add_argument("--num_workers", default=0, type=int)
-    '''net'''
-    parser.add_argument("--tf_type", default="my", type=str)
+    '''net'''    
     parser.add_argument("--n_classes", default=10, type=int)
     '''optimizer'''
     parser.add_argument("--max_lr", default=3e-4, type=float)
@@ -80,30 +79,32 @@ def train():
     # Network #
     ####################################
     from modules.models import Net
-    net = Net(emb_dim=128, n_classes=args.n_classes, nf=64, tf_type=args.tf_type, factors=[2], inp_sz=(32, 32))        
+    net = Net(emb_dim=128, n_classes=args.n_classes, nf=64, factors=[2])
     net.to(device)
+    
     print("#params={} Mparams".format(count_parameters(net)/1e6))
     t_infer = measure_inference_time(net, torch.randn(1, 3, 32, 32))
     print("time={}+-{} ms".format(t_infer[0], t_infer[1]))
     
     '''loss'''
     from losses import LabelSmoothCrossEntropyLoss, HSIC, VariationalTiltedLoss
-    l_lsce = VariationalTiltedLoss(LabelSmoothCrossEntropyLoss(reduction="none", smoothing=0.1), t=0.5).to(device) #LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
+    l_lsce = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
     l_ce = nn.CrossEntropyLoss(reduction="sum").to(device)
     l_hsic = HSIC(reduction='sum')
 
     '''optimizer'''
     if args.amp:
         from torch.cuda.amp import GradScaler
-        scaler = GradScaler(init_scale=2**10)
+        scaler = GradScaler('cuda', init_scale=2**10)
         eps = 1e-4
     else:
         scaler = None
         eps = 1e-8
     
-    parameters = add_weight_decay(net, weight_decay=args.wd, skip_list=(), additional=l_lsce.parameters())
-    from itertools import chain
+    parameters = add_weight_decay(net, weight_decay=args.wd, skip_list=(), additional=l_lsce.parameters())    
+    
     opt = optim.AdamW(parameters, lr=args.max_lr, betas=(0.9, 0.99), eps=eps, weight_decay=0)
+    
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(opt,
                                                        max_lr=args.max_lr,
                                                        steps_per_epoch=len(train_loader),
