@@ -9,7 +9,7 @@ from pathlib import Path
 from utils.helper_funcs import add_weight_decay
 import utils.logger as logger
 from metrics import accuracy
-from utils.helper_funcs import count_parameters, measure_inference_time
+from utils.helper_funcs import count_parameters, measure_inference_time, mask_patches
 # from clearml import Task
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,14 +88,12 @@ def train():
     
     '''loss'''
     from losses import LabelSmoothCrossEntropyLoss, HSIC, VariationalTiltedLoss
-    l_lsce = LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
-    l_ce = nn.CrossEntropyLoss(reduction="sum").to(device)
-    l_hsic = HSIC(reduction='sum')
-
+    l_ssl = nn.L1Loss(reduction="sum")
+    
     '''optimizer'''
     if args.amp:
         from torch.cuda.amp import GradScaler
-        scaler = GradScaler('cuda', init_scale=2**10)
+        scaler = GradScaler(device, init_scale=2**10)
         eps = 1e-4
     else:
         scaler = None
@@ -156,22 +154,22 @@ def train():
             # set 'decay_per_step' for the eooch
             ema.set_decay_per_step(len(train_loader))        
         
-        for iterno, (x, y) in  enumerate(metric_logger.log_every(train_loader, args.log_interval, header)):        
+        for iterno, (x, _) in  enumerate(metric_logger.log_every(train_loader, args.log_interval, header)):        
             net.zero_grad(set_to_none=True)
-            x = x.to(device)            
-            y = y.to(device)
+            x = x.to(device)
             
             if args.use_fda:
                 x = fda(x)
             
-            
-            y_est, _ = net(x)
-            loss_cls = l_lsce(y_est, y)
-            loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est.softmax(-1), x.view(args.batch_size, -1))
-            loss = loss_cls + loss_hsic
+            # with torch.cuda.amp.autocast(device, enabled=bool(scaler)):
+            feature_maps = net(x)
+            features_masked, _ = mask_patches(feature_maps, mask_fraction=0.2)
+            tokens = net.tf(feature_maps)
+            tokens_masked = net.tf(features_masked)
+            loss = l_ssl(tokens_masked, tokens)
                 
             if args.amp:
-                scaler.scale(l_lsce).backward()
+                scaler.scale(loss).backward()
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1)
                 scaler.step(opt)
@@ -188,12 +186,9 @@ def train():
             if not skip_scheduler:
                 lr_scheduler.step()
 
-            '''metrics'''            
-            acc = accuracy(y_est, target=y, topk=(1,))[0]
+            '''metrics'''
             
             metric_logger.update(loss=loss.item())
-            metric_logger.update(hsic=loss_hsic.item())
-            metric_logger.update(acc=acc)
             metric_logger.update(lr=opt.param_groups[0]["lr"])
             ######################
             # Update tensorboard #
@@ -202,37 +197,30 @@ def train():
             if steps % args.save_interval != 0:                                
                 writer.add_scalar("lr",lr_scheduler.get_last_lr()[0], steps)
                 writer.add_scalar("ce/train", loss.item(), steps)
-                writer.add_scalar("hsic/train", loss_hsic.item(), steps)
-                writer.add_scalar("acc/train", acc, steps)
 
             else:
-                acc_test = 0
                 loss_test = 0                
                 net.eval()
                 with torch.no_grad():                                        
-                    for i, (x, y) in enumerate(test_loader):                                                
+                    for i, (x, _) in enumerate(test_loader):                                                
                         x = x.to(device)
-                        y = y.to(device)
-                        y_est, _ = net(x)
-                        loss_test += l_ce(y_est, y).item()                        
-                        acc_test += accuracy(y_est, target=y, topk=(1, ))[0]
+                        feature_maps = net(x)
+                        features_masked, _ = mask_patches(feature_maps, mask_fraction=0.2)
+                        tokens = net.tf(feature_maps)
+                        tokens_masked = net.tf(features_masked)
+                        loss_test += l_ssl(tokens_masked, tokens)
                                 
-                loss_test /= len(test_loader)
-                acc_test /= len(test_loader)                
+                loss_test /= len(test_loader)                  
 
-                writer.add_scalar("ce/test", loss_test, steps)
-                writer.add_scalar("acc/test", acc_test, steps)
-                
-                metric_logger.update(loss_test=loss_test)
-                metric_logger.update(acc_test=acc_test)
+                writer.add_scalar("ce/test", loss_test, steps)                
+                metric_logger.update(loss_test=loss_test)                
 
                 net.train()                
                                 
                 chkpnt = {
                     'model_dict': net.state_dict(),
                     'opt_dict': opt.state_dict(),
-                    'step': steps,
-                    'best_acc': acc                        
+                    'step': steps,                    
                 }
                 torch.save(chkpnt, root / "chkpnt.pt")
 

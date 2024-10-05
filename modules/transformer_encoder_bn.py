@@ -148,7 +148,7 @@ class TFEncoderLayer(nn.Module):
         elif isinstance(m, nn.BatchNorm1d):
             with torch.no_grad():
                 nn.init.constant_(m.bias, 0)
-                nn.init.constant_(m.weight, 0)                
+                nn.init.constant_(m.weight, 1)                
     
     def forward(self, x):
         

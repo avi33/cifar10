@@ -81,15 +81,18 @@ class TFAggregation(nn.Module):
         return out
 
 class Net(nn.Module):
-    def __init__(self, emb_dim, n_classes, nf, factors) -> None:
+    def __init__(self, emb_dim, n_classes, nf, factors, ssl=False) -> None:
         super().__init__()
         self.nf = nf
         self.cnn = CNN(nf=nf, factors=factors)
         self.tf = TFAggregation(emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1)                        
-        self.project = nn.Linear(emb_dim, n_classes)    
+        self.project = nn.Linear(emb_dim, n_classes)
+        self.ssl=ssl        
 
     def forward(self, x):
         tokens = self.cnn(x)
+        if self.ssl:
+            return tokens
         pred = self.tf(tokens)
         y = self.project(pred)
         return y, tokens

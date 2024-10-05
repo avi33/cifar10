@@ -38,7 +38,7 @@ def measure_inference_time(model, input, repetitions=300, use_16b=False):
     std_syn = np.std(timings)
     return mean_syn, std_syn
 
-def add_weight_decay(model, weight_decay=1e-5, skip_list=(), additional=None):
+def add_weight_decay(model, weight_decay=1e-5, skip_list=()):
     decay = []
     no_decay = []
     for name, param in model.named_parameters():
@@ -49,12 +49,8 @@ def add_weight_decay(model, weight_decay=1e-5, skip_list=(), additional=None):
             no_decay.append(param)
         else:
             decay.append(param)
-    if additional is None:
-        parameters = [{'params': no_decay, 'weight_decay': 0.},
-                    {'params': decay, 'weight_decay': weight_decay}]
-    else:
-        parameters = [{'params': no_decay.append(additional), 'weight_decay': 0.},
-                    {'params': decay, 'weight_decay': weight_decay}]
+    parameters = [{'params': no_decay, 'weight_decay': 0.},
+                {'params': decay, 'weight_decay': weight_decay}]    
     return parameters
 
 def save_model(model, model_dir, model_filename):
@@ -107,3 +103,23 @@ def check_receptivefield(net, x):
         i1 = max(idx[:, -1])-min(idx[:, -1]) + 1
         rf = i1
     return rf
+
+def mask_patches(feature_map, mask_fraction=0.2):
+    """
+    Mask some patches in the feature map, applied over the spatial dimensions (H, W).
+    Args:
+        feature_map (torch.Tensor): Input feature map of shape (batch_size, channels, height, width).
+        mask_fraction (float): Fraction of patches to mask.
+    Returns:
+        masked_map (torch.Tensor), mask (torch.Tensor): Masked feature map and the mask itself.
+    """
+    # Get the spatial dimensions of the feature map
+    b, c, h, w = feature_map.size()
+
+    # Create a mask for the spatial dimensions (h, w) only
+    mask = torch.rand(b, 1, h, w, device=feature_map.device) > mask_fraction
+    
+    # Apply the mask: Broadcast to the channel dimension
+    masked_map = feature_map * mask  # The mask gets broadcasted to all channels
+
+    return masked_map, mask
