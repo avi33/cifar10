@@ -59,7 +59,7 @@ class TFAggregation(nn.Module):
                             num_heads=n_heads, 
                             d_model=emb_dim, 
                             ff_hidden_dim=ff_dim, 
-                            p=p, norm=nn.LayerNorm(emb_dim),
+                            p=p, norm=nn.BatchNorm1d(emb_dim),
                             use_inner_pos_embedding=True)
         self.pos_emb = nn.Conv2d(emb_dim, emb_dim, kernel_size=7, stride=1, padding=3, padding_mode='zeros', groups=emb_dim, bias=True)        
         

@@ -29,7 +29,7 @@ class MultiHeadAttention(nn.Module):
         # Outputs of all sub-layers need to be of dimension d_model
         self.W_h = nn.Conv1d(d_model, d_model, 1, 1)
         self.dropout1 = nn.Dropout(p)
-        self.apply(self._init_weights)
+        # self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Conv1d):
@@ -99,7 +99,7 @@ class CNN(nn.Module):
         self.activation = nn.ReLU(True)
         self.dropout = nn.Dropout(p=p)
         self.dropout2 = nn.Dropout(p=p)
-        self.apply(self._init_weights)
+        # self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Conv1d):
@@ -134,7 +134,7 @@ class TFEncoderLayer(nn.Module):
 
         self.norm1 = nn.BatchNorm1d(num_features=d_model, eps=1e-5)
         self.norm2 = nn.BatchNorm1d(num_features=d_model, eps=1e-5)
-        self.apply(self._init_weights)
+        # self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Conv1d):
@@ -184,7 +184,7 @@ class TFEncoder(nn.Module):
         
         self.norm = nn.BatchNorm1d(num_features=d_model, eps=1e-5) if norm is not None else norm
         
-        self.apply(self._init_weights)
+        # self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Conv1d):

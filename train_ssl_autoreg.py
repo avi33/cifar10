@@ -79,7 +79,7 @@ def train():
     # Network #
     ####################################
     from modules.models import Net
-    net = Net(emb_dim=128, n_classes=args.n_classes, nf=64, factors=[2])
+    net = Net(emb_dim=128, n_classes=args.n_classes, nf=64, factors=[2], ssl=True)
     net.to(device)
     
     print("#params={} Mparams".format(count_parameters(net)/1e6))
@@ -162,7 +162,8 @@ def train():
                 x = fda(x)
             
             # with torch.cuda.amp.autocast(device, enabled=bool(scaler)):
-            feature_maps = net(x)
+            with torch.no_grad():
+                feature_maps = net(x)
             features_masked, _ = mask_patches(feature_maps, mask_fraction=0.2)
             tokens = net.tf(feature_maps)
             tokens_masked = net.tf(features_masked)
