@@ -31,11 +31,9 @@ def parse_args():
     '''debug'''
     parser.add_argument("--save_path", default='outputs/tmp', type=Path)
     parser.add_argument("--load_path", default=None, type=Path)
-    parser.add_argument("--ssl_model", default=None, type=Path)
     parser.add_argument("--save_interval", default=100, type=int)    
     parser.add_argument("--log_interval", default=100, type=int)
-    parser.add_argument("--use_fda", default=False, action="store_true")
-    parser.add_argument("--use_dirichlet", default=False, action="store_true")
+    parser.add_argument("--use_fda", default=False, action="store_true")    
     
     args = parser.parse_args()
     return args
@@ -87,22 +85,21 @@ def train():
     print("time={}+-{} ms".format(t_infer[0], t_infer[1]))
     
     '''loss'''
-    from losses import LabelSmoothCrossEntropyLoss, HSIC, VariationalTiltedLoss
-    l_lsce = VariationalTiltedLoss(LabelSmoothCrossEntropyLoss(reduction="none", smoothing=0.1), t=0.5).to(device) #LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
-    l_ce = nn.CrossEntropyLoss(reduction="sum").to(device)
+    from losses import HSIC
+    l_ce = nn.CrossEntropyLoss(reduction="sum", label_smoothing=0.1).to(device)
     l_hsic = HSIC(reduction='sum')
 
     '''optimizer'''
     if args.amp:
         from torch.cuda.amp import GradScaler
-        scaler = GradScaler(init_scale=2**10)
+        scaler = torch.amp.GradScaler(init_scale=2**10, device=device)
         eps = 1e-4
     else:
         scaler = None
         eps = 1e-8
     
-    parameters = add_weight_decay(net, weight_decay=args.wd, skip_list=(), additional=l_lsce.parameters())
-    from itertools import chain
+    parameters = add_weight_decay(net, weight_decay=args.wd, skip_list=())
+        
     opt = optim.AdamW(parameters, lr=args.max_lr, betas=(0.9, 0.99), eps=eps, weight_decay=0)
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(opt,
                                                        max_lr=args.max_lr,
@@ -114,18 +111,7 @@ def train():
         from ema import ModelEma as EMA
         ema = EMA(net, decay_per_epoch=args.ema)
         epochs_from_last_reset = 0
-        decay_per_epoch_orig = args.ema
-
-
-    if args.use_dirichlet:
-        from modules.dirichlet import EstDirichlet
-        est_dirichlet = EstDirichlet(n_classes=args.n_classes)
-        
-    if args.ssl_model:
-        checkpoint = torch.load(args.ssl_model / "chkpnt.pt")
-        net.load_state_dict(checkpoint['model_dict'], strict=False)
-        del checkpoint
-        print('ssl model loaded')
+        decay_per_epoch_orig = args.ema    
 
     if load_root and load_root.exists():
         checkpoint = torch.load(load_root / "chkpnt.pt")
@@ -155,7 +141,8 @@ def train():
             # set 'decay_per_step' for the eooch
             ema.set_decay_per_step(len(train_loader))        
         
-        for iterno, (x, y) in  enumerate(metric_logger.log_every(train_loader, args.log_interval, header)):        
+        for iterno, (x, y) in  enumerate(metric_logger.log_every(train_loader, args.log_interval, header)):
+            steps += 1
             net.zero_grad(set_to_none=True)
             x = x.to(device)            
             y = y.to(device)
@@ -163,16 +150,14 @@ def train():
             if args.use_fda:
                 x = fda(x)
             
-            with torch.cuda.amp.autocast(enabled=scaler is not None):                
-                y_est = net(x)
-                if not l_lsce.is_initialized:
-                    l_lsce.initialize(y_est, y)
-                loss_cls = l_lsce(y_est, y)
+            with torch.amp.autocast(enabled=scaler is not None, device_type=device.type):
+                y_est = net(x)                
+                loss_cls = l_ce(y_est, y)
                 loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est.softmax(-1), x.view(args.batch_size, -1))
                 loss = loss_cls + loss_hsic
                 
             if args.amp:
-                scaler.scale(l_lsce).backward()
+                scaler.scale(l_ce).backward()
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1)
                 scaler.step(opt)
@@ -198,44 +183,37 @@ def train():
             metric_logger.update(lr=opt.param_groups[0]["lr"])
             ######################
             # Update tensorboard #
-            ######################               
-            steps += 1                        
-            if steps % args.save_interval != 0:                                
+            ######################            
+            if steps % args.log_interval != 0:                                
                 writer.add_scalar("lr",lr_scheduler.get_last_lr()[0], steps)
                 writer.add_scalar("ce/train", loss.item(), steps)
                 writer.add_scalar("hsic/train", loss_hsic.item(), steps)
                 writer.add_scalar("acc/train", acc, steps)
 
-            else:
-                acc_test = 0
-                loss_test = 0                
-                net.eval()
-                with torch.no_grad():                                        
-                    for i, (x, y) in enumerate(test_loader):                                                
-                        x = x.to(device)
-                        y = y.to(device)
-                        y_est = net(x)
-                        loss_test += l_ce(y_est, y).item()                        
-                        acc_test += accuracy(y_est, target=y, topk=(1, ))[0]
-                                
-                loss_test /= len(test_loader)
-                acc_test /= len(test_loader)                
+            if steps % args.save_interval == 0:
+                evaluate_and_save(net, test_loader, l_ce, writer, args.save_path, steps, opt)                
 
-                writer.add_scalar("ce/test", loss_test, steps)
-                writer.add_scalar("acc/test", acc_test, steps)
-                
-                metric_logger.update(loss_test=loss_test)
-                metric_logger.update(acc_test=acc_test)
+def evaluate_and_save(net, loader, criterion, writer, save_path, steps, opt):
+    net.eval()
+    total_loss, total_acc = 0.0, 0.0
+    with torch.no_grad():
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+            y_est = net(x)
+            total_loss += criterion(y_est, y).item()
+            total_acc += accuracy(y_est, y, topk=(1,))[0]
+    total_loss /= len(loader)
+    total_acc /= len(loader)
 
-                net.train()                
-                                
-                chkpnt = {
-                    'model_dict': net.state_dict(),
-                    'opt_dict': opt.state_dict(),
-                    'step': steps,
-                    'best_acc': acc                        
-                }
-                torch.save(chkpnt, root / "chkpnt.pt")
+    writer.add_scalar("loss/test", total_loss, steps)
+    writer.add_scalar("acc/test", total_acc, steps)
+
+    torch.save({
+        'model_dict': net.state_dict(),
+        'opt_dict': opt.state_dict(),
+        'step': steps,
+        'acc_test': total_acc
+    }, save_path / "chkpnt.pt")    
 
 if __name__ == "__main__":
     train()

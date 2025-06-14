@@ -29,22 +29,13 @@ class MultiHeadAttention(nn.Module):
         # Outputs of all sub-layers need to be of dimension d_model
         self.W_h = nn.Linear(d_model, d_model)
         self.dropout1 = nn.Dropout(p)
-        # self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            with torch.no_grad():
-                # m.weight.data.normal_(0.0, 0.02)
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.)
             
     def scaled_dot_product_attention(self, Q, K, V):
         # batch_size = Q.size(0) 
         # k_length = K.size(-2) 
         
         # Scaling by d_k so that the soft(arg)max doesnt saturate
-        Q = Q / np.sqrt(self.d_k)                    # (bs, n_heads, q_length, dim_per_head)
+        Q = Q / np.sqrt(self.d_k)
         scores = torch.matmul(Q, K.transpose(2,3).contiguous())          # (bs, n_heads, q_length, k_length)
         
         A = F.softmax(scores, dim=3)   # (bs, n_heads, q_length, k_length)
@@ -99,40 +90,7 @@ class CNN(nn.Module):
         self.activation = nn.ReLU(True)
         self.dropout = nn.Dropout(p=p)
         self.dropout2 = nn.Dropout(p=p)
-        # self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            with torch.no_grad():
-                m.weight.data.normal_(0.0, 0.04)
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            with torch.no_grad():
-                # nn.init.xavier_uniform_(m.weight)
-                m.weight.data.normal_(0.0, 0.04)
-                if m.bias is not None:                    
-                    nn.init.constant_(m.weight, 1)
         
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            m.weight.data.normal_(0.0, 0.04)
-        
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            # m.weight.data.normal_(0.0, 0.02)
-            with torch.no_grad():
-                if m.bias is not None:                    
-                    nn.init.constant_(m.weight, 1)
-        
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            m.weight.data.normal_(0.0, 0.04)
-    
     def forward(self, x):
         x = self.k1convL1(x)
         x = self.activation(x)
@@ -149,21 +107,7 @@ class TFEncoderLayer(nn.Module):
         self.cnn = CNN(d_model, conv_hidden_dim, p)
 
         self.layernorm1 = nn.LayerNorm(normalized_shape=d_model, eps=1e-5)
-        self.layernorm2 = nn.LayerNorm(normalized_shape=d_model, eps=1e-5)
-        # self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            with torch.no_grad():
-                if m.bias is not None:
-                    # m.weight.data.normal_(0.0, 0.02)
-                    nn.init.constant_(m.weight, 1.)
-                    nn.init.constant_(m.bias, 0.)
-                    # nn.init.constant_(m.weight, 1)
-        
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            m.weight.data.normal_(0.0, 0.04)
+        self.layernorm2 = nn.LayerNorm(normalized_shape=d_model, eps=1e-5)    
     
     def forward(self, x):
         
@@ -198,21 +142,6 @@ class TFEncoder(nn.Module):
                 self.pos_emb.append(nn.Conv1d(d_model, d_model, kernel_size=7, stride=1, padding=3, padding_mode='zeros', groups=d_model, bias=True))
         
         self.norm = nn.LayerNorm(normalized_shape=d_model, eps=1e-5) if norm is not None else norm
-        
-        # self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            with torch.no_grad():
-                if m.bias is not None:                    
-                    nn.init.constant_(m.weight, 1.)
-                    nn.init.constant_(m.bias, 0.)
-                    # m.weight.data.normal_(0.0, 0.02)
-                    # nn.init.constant_(m.weight, 1)
-        
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)    
 
     def forward(self, x):        
 
@@ -223,3 +152,27 @@ class TFEncoder(nn.Module):
         if self.norm is not None:
             x = self.norm(x)
         return x  # (batch_size, input_seq_len, d_model)
+    
+
+if __name__ == "__main__":
+    # Example usage
+    batch_size = 2
+    seq_length = 10
+    d_model = 64
+    num_heads = 8
+    ff_hidden_dim = 128
+    p = 0.1
+
+    x = torch.randn(batch_size, seq_length, d_model)
+
+    model = TFEncoder(num_layers=2, d_model=d_model, num_heads=num_heads, ff_hidden_dim=ff_hidden_dim, p=p)
+    output = model(x)
+    print(output.shape)  # Should be (batch_size, seq_length, d_model)
+    # Example usage of MultiHeadAttention
+    mha = MultiHeadAttention(d_model=d_model, num_heads=num_heads, p=p)
+    X_q = torch.randn(batch_size, seq_length, d_model)
+    X_k = torch.randn(batch_size, seq_length, d_model)
+    X_v = torch.randn(batch_size, seq_length, d_model)
+    attn_output, attn_weights = mha(X_q, X_k, X_v)
+    print(attn_output.shape)  # Should be (batch_size, seq_length, d_model)
+    print(attn_weights.shape)  # Should be (batch_size, num_heads, seq_length, seq_length)    
