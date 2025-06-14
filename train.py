@@ -141,7 +141,8 @@ def train():
             # set 'decay_per_step' for the eooch
             ema.set_decay_per_step(len(train_loader))        
         
-        for iterno, (x, y) in  enumerate(metric_logger.log_every(train_loader, args.log_interval, header)):        
+        for iterno, (x, y) in  enumerate(metric_logger.log_every(train_loader, args.log_interval, header)):
+            steps += 1
             net.zero_grad(set_to_none=True)
             x = x.to(device)            
             y = y.to(device)
@@ -182,44 +183,37 @@ def train():
             metric_logger.update(lr=opt.param_groups[0]["lr"])
             ######################
             # Update tensorboard #
-            ######################               
-            steps += 1                        
-            if steps % args.save_interval != 0:                                
+            ######################            
+            if steps % args.log_interval != 0:                                
                 writer.add_scalar("lr",lr_scheduler.get_last_lr()[0], steps)
                 writer.add_scalar("ce/train", loss.item(), steps)
                 writer.add_scalar("hsic/train", loss_hsic.item(), steps)
                 writer.add_scalar("acc/train", acc, steps)
 
-            else:
-                acc_test = 0
-                loss_test = 0                
-                net.eval()
-                with torch.no_grad():                                        
-                    for i, (x, y) in enumerate(test_loader):                                                
-                        x = x.to(device)
-                        y = y.to(device)
-                        y_est = net(x)
-                        loss_test += l_ce(y_est, y).item()                        
-                        acc_test += accuracy(y_est, target=y, topk=(1, ))[0]
-                                
-                loss_test /= len(test_loader)
-                acc_test /= len(test_loader)                
+            if steps % args.save_interval == 0:
+                evaluate_and_save(net, test_loader, l_ce, writer, args.save_path, steps, opt)                
 
-                writer.add_scalar("ce/test", loss_test, steps)
-                writer.add_scalar("acc/test", acc_test, steps)
-                
-                metric_logger.update(loss_test=loss_test)
-                metric_logger.update(acc_test=acc_test)
+def evaluate_and_save(net, loader, criterion, writer, save_path, steps, opt):
+    net.eval()
+    total_loss, total_acc = 0.0, 0.0
+    with torch.no_grad():
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+            y_est = net(x)
+            total_loss += criterion(y_est, y).item()
+            total_acc += accuracy(y_est, y, topk=(1,))[0]
+    total_loss /= len(loader)
+    total_acc /= len(loader)
 
-                net.train()                
-                                
-                chkpnt = {
-                    'model_dict': net.state_dict(),
-                    'opt_dict': opt.state_dict(),
-                    'step': steps,
-                    'best_acc': acc                        
-                }
-                torch.save(chkpnt, root / "chkpnt.pt")
+    writer.add_scalar("loss/test", total_loss, steps)
+    writer.add_scalar("acc/test", total_acc, steps)
+
+    torch.save({
+        'model_dict': net.state_dict(),
+        'opt_dict': opt.state_dict(),
+        'step': steps,
+        'acc_test': total_acc
+    }, save_path / "chkpnt.pt")    
 
 if __name__ == "__main__":
     train()
