@@ -31,11 +31,9 @@ def parse_args():
     '''debug'''
     parser.add_argument("--save_path", default='outputs/tmp', type=Path)
     parser.add_argument("--load_path", default=None, type=Path)
-    parser.add_argument("--ssl_model", default=None, type=Path)
     parser.add_argument("--save_interval", default=100, type=int)    
     parser.add_argument("--log_interval", default=100, type=int)
-    parser.add_argument("--use_fda", default=False, action="store_true")
-    parser.add_argument("--use_dirichlet", default=False, action="store_true")
+    parser.add_argument("--use_fda", default=False, action="store_true")    
     
     args = parser.parse_args()
     return args
@@ -87,22 +85,21 @@ def train():
     print("time={}+-{} ms".format(t_infer[0], t_infer[1]))
     
     '''loss'''
-    from losses import LabelSmoothCrossEntropyLoss, HSIC, VariationalTiltedLoss
-    l_lsce = VariationalTiltedLoss(LabelSmoothCrossEntropyLoss(reduction="none", smoothing=0.1), t=0.5).to(device) #LabelSmoothCrossEntropyLoss(reduction="sum", smoothing=0.1).to(device)
-    l_ce = nn.CrossEntropyLoss(reduction="sum").to(device)
+    from losses import HSIC
+    l_ce = nn.CrossEntropyLoss(reduction="sum", label_smoothing=0.1).to(device)
     l_hsic = HSIC(reduction='sum')
 
     '''optimizer'''
     if args.amp:
         from torch.cuda.amp import GradScaler
-        scaler = GradScaler(init_scale=2**10)
+        scaler = torch.amp.GradScaler(init_scale=2**10, device=device)
         eps = 1e-4
     else:
         scaler = None
         eps = 1e-8
     
-    parameters = add_weight_decay(net, weight_decay=args.wd, skip_list=(), additional=l_lsce.parameters())
-    from itertools import chain
+    parameters = add_weight_decay(net, weight_decay=args.wd, skip_list=())
+        
     opt = optim.AdamW(parameters, lr=args.max_lr, betas=(0.9, 0.99), eps=eps, weight_decay=0)
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(opt,
                                                        max_lr=args.max_lr,
@@ -114,18 +111,7 @@ def train():
         from ema import ModelEma as EMA
         ema = EMA(net, decay_per_epoch=args.ema)
         epochs_from_last_reset = 0
-        decay_per_epoch_orig = args.ema
-
-
-    if args.use_dirichlet:
-        from modules.dirichlet import EstDirichlet
-        est_dirichlet = EstDirichlet(n_classes=args.n_classes)
-        
-    if args.ssl_model:
-        checkpoint = torch.load(args.ssl_model / "chkpnt.pt")
-        net.load_state_dict(checkpoint['model_dict'], strict=False)
-        del checkpoint
-        print('ssl model loaded')
+        decay_per_epoch_orig = args.ema    
 
     if load_root and load_root.exists():
         checkpoint = torch.load(load_root / "chkpnt.pt")
@@ -163,16 +149,14 @@ def train():
             if args.use_fda:
                 x = fda(x)
             
-            with torch.cuda.amp.autocast(enabled=scaler is not None):                
-                y_est = net(x)
-                if not l_lsce.is_initialized:
-                    l_lsce.initialize(y_est, y)
-                loss_cls = l_lsce(y_est, y)
+            with torch.amp.autocast(enabled=scaler is not None, device_type=device.type):
+                y_est = net(x)                
+                loss_cls = l_ce(y_est, y)
                 loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est.softmax(-1), x.view(args.batch_size, -1))
                 loss = loss_cls + loss_hsic
                 
             if args.amp:
-                scaler.scale(l_lsce).backward()
+                scaler.scale(l_ce).backward()
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1)
                 scaler.step(opt)
