@@ -38,7 +38,7 @@ class TFAggregation(nn.Module):
                             ff_hidden_dim=ff_dim, 
                             p=p, norm=nn.LayerNorm(emb_dim),
                             use_inner_pos_embedding=True)
-        self.pos_emb = FFTConv2d(emb_dim, emb_dim)  nn.Conv2d(emb_dim, emb_dim, kernel_size=7, stride=1, padding=3, padding_mode='zeros', groups=emb_dim, bias=True)        
+        self.pos_emb = FFTConv2d(emb_dim, emb_dim)
         
         self.avg_pool = FastGlobalAvgPool(flatten=True)
         
