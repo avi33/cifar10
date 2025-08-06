@@ -77,3 +77,16 @@ class Down(nn.Module):
     def forward(self, x):
         x = self.block(x)
         return x
+    
+
+if __name__ == "__main__":
+    x = torch.randn(1, 3, 32, 32)
+    downsample = AntiAliasDownsampleLayer(remove_aa_jit=False, filt_size=3, stride=2, channels=3)
+    out = downsample(x)
+    print(out.shape)  # Should be [1, 3, 16, 16]
+    downsample_jit = AntiAliasDownsampleLayer(remove_aa_jit=True, filt_size=3, stride=2, channels=3)
+    out_jit = downsample_jit(x)
+    print(out_jit.shape)  # Should be [1, 3, 16, 16]
+    down = Down(3, kernel_size=3, stride=2)
+    out_down = down(x)
+    print(out_down.shape)  # Should be [1, 6, 16,
