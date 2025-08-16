@@ -12,7 +12,7 @@ from metrics import accuracy
 from utils.helper_funcs import count_parameters, measure_inference_time
 # from clearml import Task
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")        
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -85,7 +85,10 @@ def train():
     print("time={}+-{} ms".format(t_infer[0], t_infer[1]))
     
     '''loss'''
-    from losses import HSIC
+    from losses.label_smoothing_ce import LabelSmoothCrossEntropyLoss    
+    from losses.hsic import HSIC
+    from losses.heavy_tail_eig_loss import heavy_tail_loss, fast_heavy_loss
+    
     l_ce = nn.CrossEntropyLoss(reduction="sum", label_smoothing=0.1).to(device)
     l_hsic = HSIC(reduction='sum')
 
@@ -154,7 +157,15 @@ def train():
                 y_est = net(x)                
                 loss_cls = l_ce(y_est, y)
                 loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est.softmax(-1), x.view(args.batch_size, -1))
+                from utils.helper_funcs import get_weigts
+                from losses.heavy_tail_eig_loss import heavy_tail_loss, fast_heavy_loss
                 loss = loss_cls + loss_hsic
+                weights = get_weigts(net)
+                if epoch > 1:
+                    loss_eig = sum(fast_heavy_loss(w) for w in weights)                
+                else:
+                    loss_eig = torch.tensor(0.0, device=device)
+                loss += loss_eig / 10
                 
             if args.amp:
                 scaler.scale(l_ce).backward()
@@ -176,7 +187,7 @@ def train():
 
             '''metrics'''            
             acc = accuracy(y_est, target=y, topk=(1,))[0]
-            
+                        
             metric_logger.update(loss=loss.item())
             metric_logger.update(hsic=loss_hsic.item())
             metric_logger.update(acc=acc)
@@ -189,6 +200,7 @@ def train():
                 writer.add_scalar("ce/train", loss.item(), steps)
                 writer.add_scalar("hsic/train", loss_hsic.item(), steps)
                 writer.add_scalar("acc/train", acc, steps)
+                writer.add_scalar("eigloss/train", loss_eig.item()/10, steps)
 
             if steps % args.save_interval == 0:
                 evaluate_and_save(net, test_loader, l_ce, writer, args.save_path, steps, opt)                

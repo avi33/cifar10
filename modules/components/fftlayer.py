@@ -9,18 +9,18 @@ class FFTConv2d(nn.Module):
         self.fft = torch.fft.rfft2
         self.ifft = torch.fft.irfft2
         self.f_block = nn.Sequential(
-            nn.ReflectionPad2d(1),
-            nn.Conv2d(2*c_in, c_in, kernel_size=3, stride=1, bias=False),
-            nn.BatchNorm2d(c_in),
-            nn.LeakyReLU(0.2, True)
+            # nn.ReflectionPad2d(1),
+            nn.Conv2d(2*c_in, c_in, kernel_size=7, stride=1, padding=3, groups=c_in, bias=True),
+            # nn.BatchNorm2d(c_in),
+            # nn.LeakyReLU(0.2, True)
             )
         self.t_block = nn.Sequential(
-            nn.ReflectionPad2d(1),
-            nn.Conv2d(c_in, c_in, kernel_size=3, stride=1, bias=False),
-            nn.BatchNorm2d(c_out),
-            nn.LeakyReLU(0.2, True)
+            # nn.ReflectionPad2d(1),
+            nn.Conv2d(c_in, c_in, kernel_size=7, stride=1, padding=3, groups=c_in, bias=True),
+            # nn.BatchNorm2d(c_out),
+            # nn.LeakyReLU(0.2, True)
             )
-        self.post = nn.Conv2d(2*c_in, c_out, 1, 1)
+        self.post = nn.Conv2d(2*c_in, c_out, 1, 1, groups=c_in, bias=True)
 
     def forward(self, x):
         f = self.fft(x)

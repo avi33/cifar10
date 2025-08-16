@@ -107,3 +107,16 @@ def check_receptivefield(net, x):
         i1 = max(idx[:, -1])-min(idx[:, -1]) + 1
         rf = i1
     return rf
+
+def get_weigts(model):
+    weights = []
+    for name, module in model.named_modules():
+        if isinstance(module, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
+            continue
+        if hasattr(module, "weight") and module.weight is not None:
+            if hasattr(module, "bias") and module.bias is not None:
+                continue
+            # losses.append(heavy_tail_loss_conv(module.weight))
+            # print(f"Layer: {name} | Shape: {tuple(module.weight.shape)} | Loss: {losses[-1].item()}")
+            weights.append(module.weight)
+    return weights

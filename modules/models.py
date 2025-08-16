@@ -38,18 +38,11 @@ class TFAggregation(nn.Module):
                             ff_hidden_dim=ff_dim, 
                             p=p, norm=nn.LayerNorm(emb_dim),
                             use_inner_pos_embedding=True)
+        # self.pos_emb = nn.Conv2d(emb_dim, emb_dim, kernel_size=7, stride=1, padding=3, padding_mode='zeros', groups=emb_dim, bias=True)        
         self.pos_emb = FFTConv2d(emb_dim, emb_dim)
         
-        self.avg_pool = FastGlobalAvgPool(flatten=True)
+        self.avg_pool = FastGlobalAvgPool(flatten=True)        
         
-        self._reset_parameters()
-        
-    def _reset_parameters(self):
-        r"""Initiate parameters in the transformer model."""
-        for p in self.parameters():
-            if p.dim() > 1:
-                torch.nn.init.xavier_uniform_(p)
-
     def forward(self, x):                
         x = self.pos_emb(x)
         x = x.view(x.shape[0], self.emb_dim, -1)
