@@ -10,8 +10,7 @@ class CNN(nn.Module):
     def __init__(self, nf, factors=[2, 2, 2]) -> None:
         super().__init__()
         block = [
-            SpaceToDepth(),
-            nn.Conv2d(3 * 16, nf, 3, 1, 1, bias=False),                        
+            nn.Conv2d(3, nf, 5, 1, padding=2, padding_mode="reflect", bias=False),
             nn.BatchNorm2d(nf),
             nn.LeakyReLU(0.2, True)            
         ]
@@ -27,7 +26,7 @@ class CNN(nn.Module):
         return x
     
 class TFAggregation(nn.Module):
-    def __init__(self, emb_dim, ff_dim, n_heads, n_layers, p, tf_type) -> None:
+    def __init__(self, emb_dim, ff_dim, n_heads, n_layers, p) -> None:
         super().__init__()
         self.emb_dim = emb_dim                        
         from modules.components.transformer_encoder_bn import TFEncoder
@@ -38,8 +37,8 @@ class TFAggregation(nn.Module):
                             ff_hidden_dim=ff_dim, 
                             p=p, norm=nn.LayerNorm(emb_dim),
                             use_inner_pos_embedding=True)
-        # self.pos_emb = nn.Conv2d(emb_dim, emb_dim, kernel_size=7, stride=1, padding=3, padding_mode='zeros', groups=emb_dim, bias=True)        
-        self.pos_emb = FFTConv2d(emb_dim, emb_dim)
+        self.pos_emb = nn.Conv2d(emb_dim, emb_dim, kernel_size=7, stride=1, padding=3, padding_mode='zeros', groups=emb_dim, bias=True)        
+        # self.pos_emb = FFTConv2d(emb_dim, emb_dim)
         
         self.avg_pool = FastGlobalAvgPool(flatten=True)        
         
@@ -51,11 +50,11 @@ class TFAggregation(nn.Module):
         return out
 
 class Net(nn.Module):
-    def __init__(self, emb_dim, n_classes, nf, factors, tf_type, inp_sz) -> None:
+    def __init__(self, emb_dim, n_classes, nf, factors) -> None:
         super().__init__()
         self.nf = nf
         self.cnn = CNN(nf=nf, factors=factors)
-        self.tf = TFAggregation(emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1, tf_type=tf_type)                        
+        self.tf = TFAggregation(emb_dim=emb_dim, ff_dim=emb_dim*4, n_heads=2, n_layers=4, p=0.1)                        
         self.project = nn.Linear(emb_dim, n_classes)
 
     def forward(self, x):
