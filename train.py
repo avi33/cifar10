@@ -83,8 +83,7 @@ def train():
     t_infer = measure_inference_time(net, torch.randn(1, 3, 32, 32))
     print("time={}+-{} ms".format(t_infer[0], t_infer[1]))
     
-    '''loss'''
-    from losses.label_smoothing_ce import LabelSmoothCrossEntropyLoss    
+    '''loss'''    
     from losses.hsic import HSIC
     from losses.heavy_tail_eig_loss import heavy_tail_loss, fast_heavy_loss
     
@@ -159,12 +158,12 @@ def train():
                 from utils.helper_funcs import get_weigts
                 from losses.heavy_tail_eig_loss import fast_heavy_loss
                 loss = loss_cls + loss_hsic
-                # weights = get_weigts(net)
-                # if epoch > 1:
-                #     loss_eig = sum(fast_heavy_loss(w) for w in weights)                
-                # else:
-                #     loss_eig = torch.tensor(0.0, device=device)
-                # loss += loss_eig / 10
+                weights = get_weigts(net)
+                if epoch > 1:
+                    loss_eig = sum(fast_heavy_loss(w) for w in weights)                
+                else:
+                    loss_eig = torch.tensor(0.0, device=device)
+                loss += loss_eig / 10
                 
             if args.amp:
                 scaler.scale(l_ce).backward()
@@ -199,7 +198,7 @@ def train():
                 writer.add_scalar("ce/train", loss.item(), steps)
                 writer.add_scalar("hsic/train", loss_hsic.item(), steps)
                 writer.add_scalar("acc/train", acc, steps)
-                # writer.add_scalar("eigloss/train", loss_eig.item()/10, steps)
+                writer.add_scalar("eigloss/train", loss_eig.item()/10, steps)
 
             if steps % args.save_interval == 0:
                 evaluate_and_save(net, test_loader, l_ce, writer, args.save_path, steps, opt)                
