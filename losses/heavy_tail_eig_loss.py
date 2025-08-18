@@ -11,10 +11,13 @@ def heavy_tail_loss(Ws, eps=1e-4):
         torch.Tensor scalar loss
     """
     # Flatten to (out_channels, in_channels * kH * kW)
-    loss = []
+    loss = 0
     for W in Ws:
         W2d = W.view(W.size(0), -1)
 
+        if W2d.shape[0] == 1:
+            W2d = W2d.t().contigueus()
+            
         # Gram matrix
         gram = W2d @ W2d.t() + torch.eye(W2d.size(0), device=W.device) * eps
 
@@ -28,9 +31,9 @@ def heavy_tail_loss(Ws, eps=1e-4):
         lambda_mean = eigenvalues.mean()      # mean of all
 
         # Heavy-tail penalty
-        loss.append(-torch.sum(torch.log(-(lambda_max - lambda_mean))))
+        loss += -torch.sum(torch.log(-(lambda_max - lambda_mean)))
         
-    return torch.stack(loss).mean() if len(loss) > 1 else loss[0]
+    return loss
 
 
 def fast_heavy_loss(W, n_iter=5):

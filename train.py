@@ -7,14 +7,14 @@ import yaml
 import argparse
 from pathlib import Path
 from utils.helper_funcs import add_weight_decay
-import utils.logger as logger
+import utils.logger as logger, 
 from metrics import accuracy
 from utils.helper_funcs import count_parameters, measure_inference_time
 # from clearml import Task
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")        
 
-def parse_args():
+def parse_args_():
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", default=16, type=int)
     parser.add_argument("--n_epochs", default=100, type=int)
@@ -37,8 +37,14 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def parse_args(path: str):
+    with open(path, "r") as f:
+        cfg = yaml.safe_load(f)    
+    return to_namespace(cfg)
+
+
 def train():
-    args = parse_args()
+    args = parse_args("configs/config.yaml")    
 
     root = Path(args.save_path)
     load_root = Path(args.load_path) if args.load_path else None    
@@ -160,7 +166,7 @@ def train():
                 loss = loss_cls + loss_hsic
                 weights = get_weigts(net)
                 if epoch > 1:
-                    loss_eig = sum(fast_heavy_loss(w) for w in weights)                
+                    loss_eig = sum(fast_heavy_loss(w) for w in weights)
                 else:
                     loss_eig = torch.tensor(0.0, device=device)
                 loss += loss_eig / 10

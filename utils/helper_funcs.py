@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 import copy
+from types import SimpleNamespace
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -120,3 +121,12 @@ def get_weigts(model):
             # print(f"Layer: {name} | Shape: {tuple(module.weight.shape)} | Loss: {losses[-1].item()}")
             weights.append(module.weight)
     return weights
+
+# Convert dict → SimpleNamespace recursively
+def to_namespace(d):
+    if isinstance(d, dict):
+        return SimpleNamespace(**{k: to_namespace(v) for k, v in d.items()})
+    elif isinstance(d, list):
+        return [to_namespace(i) for i in d]
+    else:
+        return d
