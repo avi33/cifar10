@@ -7,7 +7,8 @@ import yaml
 import argparse
 from pathlib import Path
 from utils.helper_funcs import add_weight_decay
-import utils.logger as logger, 
+import utils.logger as logger
+from utils.helper_funcs import to_namespace
 from metrics import accuracy
 from utils.helper_funcs import count_parameters, measure_inference_time
 # from clearml import Task
@@ -92,7 +93,7 @@ def train():
     '''loss'''    
     from losses.hsic import HSIC
     from losses.heavy_tail_eig_loss import heavy_tail_loss, fast_heavy_loss
-    
+    from losses.evidental_loss import EvidentialLoss, dirichlet_kl    
     l_ce = nn.CrossEntropyLoss(reduction="sum", label_smoothing=0.1).to(device)
     l_hsic = HSIC(reduction='sum')
 
@@ -158,36 +159,28 @@ def train():
                 x = fda(x)
             
             with torch.amp.autocast(enabled=scaler is not None, device_type=device.type):
-                y_est = net(x)                
-                loss_cls = l_ce(y_est, y)
+                y_est = net(x)
+                loss = l_ce(y_est, y)              
                 loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est.softmax(-1), x.view(args.batch_size, -1))
-                from utils.helper_funcs import get_weigts
-                from losses.heavy_tail_eig_loss import fast_heavy_loss
-                loss = loss_cls + loss_hsic
-                weights = get_weigts(net)
-                if epoch > 1:
-                    loss_eig = sum(fast_heavy_loss(w) for w in weights)
-                else:
-                    loss_eig = torch.tensor(0.0, device=device)
-                loss += loss_eig / 10
+
                 
             if args.amp:
-                scaler.scale(l_ce).backward()
+                scaler.scale(loss).backward()
                 scaler.unscale_(opt)
-                torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1)
+                torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
+                
+                # step() returns True if optimizer stepped, False if skipped
                 scaler.step(opt)
-                amp_scale = scaler.get_scale()
                 scaler.update()
-                skip_scheduler = amp_scale != scaler.get_scale()
             else:
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
                 opt.step()
 
+            # Always step scheduler - it's tied to optimizer steps internally
+            lr_scheduler.step()
             if args.ema is not None:
                 ema.update(net, steps)
-
-            if not skip_scheduler:
-                lr_scheduler.step()
 
             '''metrics'''            
             acc = accuracy(y_est, target=y, topk=(1,))[0]
@@ -204,7 +197,7 @@ def train():
                 writer.add_scalar("ce/train", loss.item(), steps)
                 writer.add_scalar("hsic/train", loss_hsic.item(), steps)
                 writer.add_scalar("acc/train", acc, steps)
-                writer.add_scalar("eigloss/train", loss_eig.item()/10, steps)
+                # writer.add_scalar("eigloss/train", loss_eig.item()/10, steps)
 
             if steps % args.save_interval == 0:
                 evaluate_and_save(net, test_loader, l_ce, writer, args.save_path, steps, opt)                
@@ -217,6 +210,7 @@ def evaluate_and_save(net, loader, criterion, writer, save_path, steps, opt):
             x, y = x.to(device), y.to(device)
             y_est = net(x)
             total_loss += criterion(y_est, y).item()
+            y_est = y_est / y_est.sum(dim=1, keepdim=True)
             total_acc += accuracy(y_est, y, topk=(1,))[0]
     total_loss /= len(loader)
     total_acc /= len(loader)
@@ -229,7 +223,9 @@ def evaluate_and_save(net, loader, criterion, writer, save_path, steps, opt):
         'opt_dict': opt.state_dict(),
         'step': steps,
         'acc_test': total_acc
-    }, save_path / "chkpnt.pt")    
+    }, Path(save_path) / "chkpnt.pt")
+    net.train()
+    return total_acc
 
 if __name__ == "__main__":
     train()

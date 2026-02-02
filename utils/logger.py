@@ -1,8 +1,6 @@
 import torch
 import time, datetime
 from collections import deque, defaultdict
-import numpy as np
-from typing import Optional, Tuple
 
 epsilon = 1e-8
 
