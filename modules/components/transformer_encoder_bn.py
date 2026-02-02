@@ -29,16 +29,7 @@ class MultiHeadAttention(nn.Module):
         # Outputs of all sub-layers need to be of dimension d_model
         self.W_h = nn.Conv1d(d_model, d_model, 1, 1)
         self.dropout1 = nn.Dropout(p)
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Conv1d):
-            with torch.no_grad():
-                # m.weight.data.normal_(0.0, 0.02)
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.)
-            
+   
     def scaled_dot_product_attention(self, Q, K, V):
         # batch_size = Q.size(0) 
         # k_length = K.size(-2) 
@@ -98,24 +89,7 @@ class CNN(nn.Module):
         self.k1convL2 = nn.Conv1d(hidden_dim, d_model, 1, 1)
         self.activation = nn.ReLU(True)
         self.dropout = nn.Dropout(p=p)
-        self.dropout2 = nn.Dropout(p=p)
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Conv1d):
-            with torch.no_grad():
-                # m.weight.data.normal_(0.0, 0.04)
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.)
-        
-        
-        elif isinstance(m, nn.BatchNorm1d):            
-            with torch.no_grad():
-                nn.init.constant_(m.bias, 0)
-                nn.init.constant_(m.weight, 1)
-                # m.weight.data.normal_(0.0, 0.02)
-        
+        self.dropout2 = nn.Dropout(p=p)        
     
     def forward(self, x):
         x = self.k1convL1(x)
@@ -134,21 +108,6 @@ class TFEncoderLayer(nn.Module):
 
         self.norm1 = nn.BatchNorm1d(num_features=d_model, eps=1e-5)
         self.norm2 = nn.BatchNorm1d(num_features=d_model, eps=1e-5)
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Conv1d):
-            with torch.no_grad():
-                if m.bias is not None:
-                    # m.weight.data.normal_(0.0, 0.02)
-                    # nn.init.constant_(m.weight, 1.)
-                    nn.init.constant_(m.bias, 0.)
-                    # nn.init.constant_(m.weight, 1)
-        
-        elif isinstance(m, nn.BatchNorm1d):
-            with torch.no_grad():
-                nn.init.constant_(m.bias, 0)
-                nn.init.constant_(m.weight, 0)                
     
     def forward(self, x):
         
@@ -183,21 +142,7 @@ class TFEncoder(nn.Module):
                 self.pos_emb.append(nn.Conv1d(d_model, d_model, kernel_size=5, stride=1, padding=2, padding_mode='zeros', groups=d_model, bias=True))
         
         self.norm = nn.BatchNorm1d(num_features=d_model, eps=1e-5) if norm is not None else norm
-        
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Conv1d):
-            with torch.no_grad():                
-                nn.init.constant_(m.weight, 1.)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.)
-        
-        elif isinstance(m, nn.BatchNorm1d):            
-            nn.init.constant_(m.weight, 1)
-            with torch.no_grad():                
-                nn.init.constant_(m.bias, 0)
-
+                
     def forward(self, x):        
 
         for i in range(self.num_layers):
