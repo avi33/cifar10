@@ -1,5 +1,5 @@
 batch_size: 128
-n_epochs: 2
+n_epochs: 16
 dataset: cifar10
 num_workers: 8
 n_classes: 10

@@ -17,10 +17,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def parse_args_():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", default=16, type=int)
-    parser.add_argument("--n_epochs", default=100, type=int)
+    parser.add_argument("--batch_size", default=64, type=int)
+    parser.add_argument("--n_epochs", default=16, type=int)
     parser.add_argument("--dataset", default="cifar10", type=str)
-    parser.add_argument("--num_workers", default=0, type=int)
+    parser.add_argument("--num_workers", default=8, type=int)
     '''net'''    
     parser.add_argument("--n_classes", default=10, type=int)
     '''optimizer'''
@@ -36,6 +36,9 @@ def parse_args_():
     parser.add_argument("--use_fda", default=False, action="store_true")    
     
     args = parser.parse_args()
+    
+    print(args)
+    
     return args
 
 def parse_args(path: str):
@@ -83,8 +86,8 @@ def train():
     ####################################
     # Network #
     ####################################
-    from modules.models import Net
-    net = Net(emb_dim=128, n_classes=args.n_classes, nf=16, factors=[2, 2, 2])
+    from modules.model import Net
+    net = Net(n_classes=args.n_classes, nf=16, factors=[2, 2, 2])
     net.to(device)
     print("#params={} Mparams".format(count_parameters(net)/1e6))
     t_infer = measure_inference_time(net, torch.randn(1, 3, 32, 32))
@@ -92,8 +95,6 @@ def train():
     
     '''loss'''    
     from losses.hsic import HSIC
-    from losses.heavy_tail_eig_loss import heavy_tail_loss, fast_heavy_loss
-    from losses.evidental_loss import EvidentialLoss, dirichlet_kl    
     l_ce = nn.CrossEntropyLoss(reduction="sum", label_smoothing=0.1).to(device)
     l_hsic = HSIC(reduction='sum')
 
@@ -130,17 +131,15 @@ def train():
         print('checkpoints loaded')        
 
     
-    torch.backends.cudnn.benchmark = True
-    acc_test = 0
+    torch.backends.cudnn.benchmark = True    
     steps = 0        
-    skip_scheduler = False
 
     for epoch in range(1, args.n_epochs + 1):
         metric_logger = logger.MetricLogger(delimiter="  ")
         metric_logger.add_meter("lr", logger.SmoothedValue(window_size=1, fmt="{value:.6f}"))
         header = f"Epoch: [{epoch}]"
         
-        if args.ema is not None:
+        if args.ema is not None: # type: ignore
             if epochs_from_last_reset <= 1:  # two first epochs do ultra short-term ema
                 ema.decay_per_epoch = 0.01
             else:
@@ -162,7 +161,6 @@ def train():
                 y_est = net(x)
                 loss = l_ce(y_est, y)              
                 loss_hsic = l_hsic(F.one_hot(y, num_classes=args.n_classes)-y_est.softmax(-1), x.view(args.batch_size, -1))
-
                 
             if args.amp:
                 scaler.scale(loss).backward()
