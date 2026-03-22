@@ -12,10 +12,19 @@ class DownsampleJIT(object):
 
         # assert self.filt_size == 3
         # assert stride == 2
-        
+
         device = torch.device(device)
-        ha = torch.arange(1, filt_size//2+1+1, 1)
-        a = torch.cat((ha, ha.flip(dims=[-1,])[1:])).float()
+        ha = torch.arange(1, filt_size // 2 + 1 + 1, 1)
+        a = torch.cat(
+            (
+                ha,
+                ha.flip(
+                    dims=[
+                        -1,
+                    ]
+                )[1:],
+            )
+        ).float()
         # a = torch.tensor([1., 2., 1.])
 
         filt = (a[:, None] * a[None, :]).clone().detach()
@@ -24,9 +33,10 @@ class DownsampleJIT(object):
 
     def __call__(self, input: torch.Tensor):
         if input.dtype != self.filt.dtype:
-            self.filt = self.filt.float() 
-        input_pad = F.pad(input, [self.filt_size//2]*4, 'reflect')
+            self.filt = self.filt.float()
+        input_pad = F.pad(input, [self.filt_size // 2] * 4, "reflect")
         return F.conv2d(input_pad, self.filt, stride=self.stride, padding=0, groups=input.shape[1])
+
 
 class Downsample(nn.Module):
     def __init__(self, filt_size=3, stride=2, channels=None, device="cuda"):
@@ -36,25 +46,35 @@ class Downsample(nn.Module):
         self.channels = channels
         # assert self.filt_size == 3
         device = torch.device(device)
-        ha = torch.arange(1, filt_size//2+1+1, 1)
-        a = torch.cat((ha, ha.flip(dims=[-1,])[1:])).float()
+        ha = torch.arange(1, filt_size // 2 + 1 + 1, 1)
+        a = torch.cat(
+            (
+                ha,
+                ha.flip(
+                    dims=[
+                        -1,
+                    ]
+                )[1:],
+            )
+        ).float()
         a = a / a.sum()
 
+        a = torch.tensor([1.0, 2.0, 1.0])
 
-        a = torch.tensor([1., 2., 1.])
-
-        filt = (a[:, None] * a[None, :])
+        filt = a[:, None] * a[None, :]
         filt = filt / torch.sum(filt)
         filt = filt[None, None, :, :].repeat((self.channels, 1, 1, 1)).to(device).half()
-        self.register_buffer('filt', filt)
+        self.register_buffer("filt", filt)
 
     def forward(self, input):
-        input_pad = F.pad(input, (1, 1, 1, 1), 'reflect')
+        input_pad = F.pad(input, (1, 1, 1, 1), "reflect")
         return F.conv2d(input_pad, self.filt, stride=self.stride, padding=0, groups=input.shape[1])
 
+
 class AntiAliasDownsampleLayer(nn.Module):
-    def __init__(self, remove_aa_jit: bool = False, filt_size: int = 3, stride: int = 2,
-                 channels: int = 0, device: str = "cuda"):
+    def __init__(
+        self, remove_aa_jit: bool = False, filt_size: int = 3, stride: int = 2, channels: int = 0, device: str = "cuda"
+    ):
         super(AntiAliasDownsampleLayer, self).__init__()
         if not remove_aa_jit:
             self.op = DownsampleJIT(filt_size, stride, channels, device=device)
@@ -64,20 +84,29 @@ class AntiAliasDownsampleLayer(nn.Module):
     def forward(self, x):
         return self.op(x)
 
+
 class Down(nn.Module):
     def __init__(self, nf, kernel_size, stride) -> None:
         super().__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(nf, nf*2, kernel_size=kernel_size, stride=1, bias=False, padding=kernel_size//2, padding_mode="reflect"),
-            nn.BatchNorm2d(nf*2),
+            nn.Conv2d(
+                nf,
+                nf * 2,
+                kernel_size=kernel_size,
+                stride=1,
+                bias=False,
+                padding=kernel_size // 2,
+                padding_mode="reflect",
+            ),
+            nn.BatchNorm2d(nf * 2),
             nn.LeakyReLU(0.2, True),
-            AntiAliasDownsampleLayer(channels=nf*2, stride=stride, filt_size=kernel_size)
+            AntiAliasDownsampleLayer(channels=nf * 2, stride=stride, filt_size=kernel_size),
         )
 
     def forward(self, x):
         x = self.block(x)
         return x
-    
+
 
 if __name__ == "__main__":
     x = torch.randn(1, 3, 32, 32)
